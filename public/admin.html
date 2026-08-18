@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Showroom Admin</title>
+<style>
+  body {
+    font-family: -apple-system, sans-serif; max-width: 480px; margin: 40px auto;
+    padding: 0 16px; color: #222;
+  }
+  h1 { font-size: 20px; }
+  .tabs { display: flex; gap: 8px; margin: 16px 0 24px; }
+  .tab-btn {
+    border: 1px solid #ccc; border-radius: 8px; background: #fff; padding: 8px 12px; cursor: pointer;
+  }
+  .tab-btn.active { background: #0F6E56; color: #fff; border-color: #0F6E56; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .buttons { display: flex; gap: 12px; margin: 24px 0; }
+  button {
+    flex: 1; padding: 16px; font-size: 16px; border-radius: 8px; border: 2px solid #ccc;
+    background: #f5f5f5; cursor: pointer;
+  }
+  button.active { background: #0F6E56; color: white; border-color: #0F6E56; }
+  #displays { margin-top: 32px; }
+  .display-row {
+    display: flex; justify-content: space-between; padding: 8px 12px;
+    border-bottom: 1px solid #eee; font-size: 14px;
+  }
+  .display-row select { max-width: 190px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #0F6E56; margin-right: 8px; }
+  #empty { color: #888; font-size: 14px; }
+  .content-card { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; margin-bottom: 10px; font-size: 13px; }
+  .content-row { margin: 8px 0; }
+  .content-row label { display: block; margin-bottom: 4px; font-size: 12px; color: #444; }
+  .content-row input, .content-row select {
+    width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 6px;
+  }
+  .muted { color: #777; font-size: 12px; }
+  .content-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .danger { background: #fff5f5; border-color: #f1b5b5; color: #a20000; }
+  #content-message { min-height: 18px; margin-top: 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Showroom admin</h1>
+  <div class="tabs">
+    <button id="tab-control" class="tab-btn active">Language Control</button>
+    <button id="tab-content" class="tab-btn">Content Library</button>
+  </div>
+
+  <section id="panel-control" class="tab-panel active">
+    <p>Current language: <strong id="current-lang">—</strong></p>
+
+    <div class="buttons">
+      <button id="btn-en">English</button>
+      <button id="btn-es">Español</button>
+    </div>
+
+    <div id="displays">
+      <h2 style="font-size:16px;">Connected displays</h2>
+      <div id="display-list"><span id="empty">No displays connected yet</span></div>
+    </div>
+  </section>
+
+  <section id="panel-content" class="tab-panel">
+    <h2 style="font-size:16px;">Add content</h2>
+    <div class="content-row">
+      <label for="content-type">Content type</label>
+      <select id="content-type">
+        <option value="link">Link (Canva / Genially / webpage)</option>
+        <option value="png">PNG upload</option>
+      </select>
+    </div>
+    <div class="content-row">
+      <label for="content-screen-type">Content key / screen type</label>
+      <input id="content-screen-type" placeholder="example: promo-fall">
+    </div>
+
+    <div id="link-fields">
+      <div class="content-row">
+        <label for="content-provider">Provider label</label>
+        <select id="content-provider">
+          <option value="link">Generic link</option>
+          <option value="canva">Canva</option>
+          <option value="genially">Genially</option>
+        </select>
+      </div>
+      <div class="content-row">
+        <label for="content-link-en">English URL</label>
+        <input id="content-link-en" placeholder="https://...">
+      </div>
+      <div class="content-row">
+        <label for="content-link-es">Spanish URL</label>
+        <input id="content-link-es" placeholder="https://...">
+      </div>
+    </div>
+
+    <div id="png-fields" style="display:none;">
+      <div class="content-row">
+        <label for="content-png-en">English PNG</label>
+        <input id="content-png-en" type="file" accept="image/png">
+      </div>
+      <div class="content-row">
+        <label for="content-png-es">Spanish PNG</label>
+        <input id="content-png-es" type="file" accept="image/png">
+      </div>
+    </div>
+
+    <div class="content-actions">
+      <button id="save-content-btn">Save content</button>
+    </div>
+    <div id="content-message"></div>
+
+    <h2 style="font-size:16px; margin-top:24px;">Library entries</h2>
+    <div id="content-list"><span class="muted">No content yet.</span></div>
+  </section>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const tabControl = document.getElementById('tab-control');
+    const tabContent = document.getElementById('tab-content');
+    const panelControl = document.getElementById('panel-control');
+    const panelContent = document.getElementById('panel-content');
+    const btnEn = document.getElementById('btn-en');
+    const btnEs = document.getElementById('btn-es');
+    const currentLangEl = document.getElementById('current-lang');
+    const listEl = document.getElementById('display-list');
+    const contentTypeEl = document.getElementById('content-type');
+    const contentScreenTypeEl = document.getElementById('content-screen-type');
+    const contentProviderEl = document.getElementById('content-provider');
+    const contentLinkEnEl = document.getElementById('content-link-en');
+    const contentLinkEsEl = document.getElementById('content-link-es');
+    const contentPngEnEl = document.getElementById('content-png-en');
+    const contentPngEsEl = document.getElementById('content-png-es');
+    const saveContentBtn = document.getElementById('save-content-btn');
+    const contentMessageEl = document.getElementById('content-message');
+    const contentListEl = document.getElementById('content-list');
+    const linkFieldsEl = document.getElementById('link-fields');
+    const pngFieldsEl = document.getElementById('png-fields');
+    let screenTypes = [];
+    let connectedDisplays = [];
+    let customContents = [];
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function setActive(lang) {
+      btnEn.classList.toggle('active', lang === 'en');
+      btnEs.classList.toggle('active', lang === 'es');
+      currentLangEl.textContent = lang === 'en' ? 'English' : 'Español';
+    }
+
+    function showTab(tabName) {
+      const inControl = tabName === 'control';
+      tabControl.classList.toggle('active', inControl);
+      tabContent.classList.toggle('active', !inControl);
+      panelControl.classList.toggle('active', inControl);
+      panelContent.classList.toggle('active', !inControl);
+    }
+
+    function getScreenTypeOptions(selectedType) {
+      return screenTypes
+        .map(type => {
+          const selected = type === selectedType ? ' selected' : '';
+          return `<option value="${type}"${selected}>${type}</option>`;
+        })
+        .join('');
+    }
+
+    function renderContentList() {
+      if (customContents.length === 0) {
+        contentListEl.innerHTML = '<span class="muted">No content yet.</span>';
+        return;
+      }
+
+      contentListEl.innerHTML = customContents
+        .map(content => {
+          const completeness = content.hasEnglish && content.hasSpanish ? 'ready' : 'missing language';
+          const provider = content.provider ? ` / ${escapeHtml(content.provider)}` : '';
+          return `
+            <div class="content-card">
+              <div><strong>${escapeHtml(content.screenType)}</strong> — ${escapeHtml(content.source)}${provider}</div>
+              <div class="muted">Status: ${escapeHtml(completeness)}</div>
+              <div class="content-actions">
+                <button class="danger delete-content-btn" data-screen-type="${escapeHtml(content.screenType)}">Delete</button>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+    }
+
+    function renderDisplayList() {
+      if (connectedDisplays.length === 0) {
+        listEl.innerHTML = '<span id="empty">No displays connected yet</span>';
+        return;
+      }
+
+      listEl.innerHTML = connectedDisplays
+        .map(d => `
+          <div class="display-row">
+            <span><span class="dot"></span>${d.screenId}</span>
+            <select class="screen-type-select" data-socket-id="${d.socketId}">
+              ${getScreenTypeOptions(d.screenType)}
+            </select>
+          </div>
+        `)
+        .join('');
+    }
+
+    function setContentMessage(message, isError) {
+      contentMessageEl.textContent = message;
+      contentMessageEl.style.color = isError ? '#a20000' : '#0F6E56';
+    }
+
+    function normalizeScreenType(value) {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    }
+
+    async function readFileAsDataUrl(file) {
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error(`Unable to read file: ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function loadScreenTypes() {
+      const response = await fetch('/screen-types');
+      if (!response.ok) {
+        throw new Error(`Failed to load screen types: ${response.status}`);
+      }
+
+      const text = await response.text();
+      screenTypes = text
+        .split(',')
+        .map(type => type.trim())
+        .filter(Boolean);
+    }
+
+    async function loadCustomContents() {
+      const response = await fetch('/custom-contents');
+      if (!response.ok) {
+        throw new Error(`Failed to load content library: ${response.status}`);
+      }
+      customContents = await response.json();
+      renderContentList();
+    }
+
+    async function refreshAdminData() {
+      await Promise.all([loadScreenTypes(), loadCustomContents()]);
+      renderDisplayList();
+      socket.emit('request-display-list');
+    }
+
+    function updateContentFields() {
+      const isLink = contentTypeEl.value === 'link';
+      linkFieldsEl.style.display = isLink ? '' : 'none';
+      pngFieldsEl.style.display = isLink ? 'none' : '';
+    }
+
+    async function saveLinkContent(screenType) {
+      const payload = {
+        screenType,
+        provider: contentProviderEl.value,
+        urlEn: contentLinkEnEl.value.trim(),
+        urlEs: contentLinkEsEl.value.trim()
+      };
+      const response = await fetch('/custom-contents/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Unable to save link content');
+      }
+    }
+
+    async function savePngContent(screenType) {
+      const files = [
+        { lang: 'en', file: contentPngEnEl.files[0] },
+        { lang: 'es', file: contentPngEsEl.files[0] }
+      ];
+      for (const item of files) {
+        if (!item.file) {
+          throw new Error(`Missing ${item.lang.toUpperCase()} PNG file`);
+        }
+        const dataUrl = await readFileAsDataUrl(item.file);
+        const response = await fetch('/custom-contents/png', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            screenType,
+            language: item.lang,
+            dataUrl
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json();
+          throw new Error(body.error || `Unable to upload ${item.lang.toUpperCase()} PNG`);
+        }
+      }
+    }
+
+    async function saveContent() {
+      const screenType = normalizeScreenType(contentScreenTypeEl.value);
+      if (!screenType) {
+        throw new Error('Content key is required');
+      }
+      if (contentTypeEl.value === 'link') {
+        await saveLinkContent(screenType);
+      } else {
+        await savePngContent(screenType);
+      }
+    }
+
+    async function deleteContent(screenType) {
+      const response = await fetch(`/custom-contents/${encodeURIComponent(screenType)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Unable to delete content');
+      }
+    }
+
+    btnEn.onclick = () => socket.emit('set-language', 'en');
+    btnEs.onclick = () => socket.emit('set-language', 'es');
+    tabControl.onclick = () => showTab('control');
+    tabContent.onclick = () => showTab('content');
+    contentTypeEl.onchange = updateContentFields;
+
+    saveContentBtn.onclick = async () => {
+      saveContentBtn.disabled = true;
+      setContentMessage('Saving content…', false);
+      try {
+        await saveContent();
+        await refreshAdminData();
+        setContentMessage('Content saved successfully.', false);
+      } catch (error) {
+        setContentMessage(error.message, true);
+      } finally {
+        saveContentBtn.disabled = false;
+      }
+    };
+
+    socket.on('connect', () => {
+      socket.emit('request-state');
+      socket.emit('request-display-list');
+    });
+    socket.on('language-changed', setActive);
+    socket.on('content-library-changed', () => {
+      refreshAdminData().catch((error) => setContentMessage(error.message, true));
+    });
+
+    listEl.addEventListener('change', (event) => {
+      const select = event.target.closest('.screen-type-select');
+      if (!select) return;
+
+      socket.emit('set-display-screen-type', {
+        socketId: select.dataset.socketId,
+        screenType: select.value
+      });
+    });
+
+    socket.on('display-list', (displays) => {
+      connectedDisplays = displays;
+      renderDisplayList();
+    });
+
+    contentListEl.addEventListener('click', async (event) => {
+      const button = event.target.closest('.delete-content-btn');
+      if (!button) return;
+
+      const screenType = button.dataset.screenType;
+      if (!screenType) return;
+
+      button.disabled = true;
+      setContentMessage(`Deleting ${screenType}…`, false);
+      try {
+        await deleteContent(screenType);
+        await refreshAdminData();
+        setContentMessage(`Deleted ${screenType}.`, false);
+      } catch (error) {
+        setContentMessage(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    refreshAdminData().catch((error) => setContentMessage(error.message, true));
+  </script>
+</body>
+</html>
