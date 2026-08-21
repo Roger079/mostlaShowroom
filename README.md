@@ -67,3 +67,31 @@ languages exist.
    `http://<hub-tailscale-ip>:3000/display.html?screen=screenN`.
 4. Add basic auth or a shared key to `admin.html` before this leaves
    your local testing.
+
+## Display PC Auto-Start Setup
+
+Each display PC can automatically launch the fullscreen navigator on boot.
+
+### 1. Launching the Display Script
+Run `start-display.bat` on the display PC:
+- **First-time use:** A dialog window will pop up asking for:
+  1. **Display Name** (e.g. `screen1`, `entrance-display`)
+  2. **Hub Server URL** (e.g. `http://192.168.1.100:3000` or `https://tremor-tacky-dandelion.ngrok-free.dev`)
+- Settings are saved to `scripts/display-config.json`.
+- Chrome, Edge, Brave, or Firefox will open automatically in **fullscreen kiosk mode**.
+
+### 2. Auto-Start on Windows Boot
+To make the display start automatically when the display PC powers on:
+1. Open PowerShell in the project directory.
+2. Run:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\setup-startup.ps1
+   ```
+3. A shortcut is created in Windows Startup (`shell:startup`). Whenever the PC reboots, the kiosk browser launches automatically.
+
+### 3. Reconfiguring Display Settings
+To change the display name or server URL:
+```cmd
+start-display.bat -Reset
+```
+

@@ -1,34 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<title>Display</title>
-<style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  .layer {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    object-fit: cover; opacity: 0; transition: opacity 0.4s ease;
-  }
-  .layer.visible { opacity: 1; }
-  #status {
-    position: absolute; bottom: 8px; left: 8px; color: #0f0;
-    font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.5);
-    padding: 4px 8px; border-radius: 4px;
-  }
-</style>
+  <meta charset="UTF-8">
+  <title>Display</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+
+    .layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+
+    .layer.visible {
+      opacity: 1;
+    }
+
+    #status {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+  </style>
 </head>
+
 <body>
   <img id="img-en" class="layer" alt="">
   <img id="img-es" class="layer" alt="">
+  <video id="video-en" class="layer" autoplay loop muted playsinline></video>
+  <video id="video-es" class="layer" autoplay loop muted playsinline></video>
   <iframe id="embed-frame" class="layer" title="Embedded display" frameborder="0" allowfullscreen></iframe>
   <div id="status">connecting…</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
-    //const displayId = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    const displayId = params.get('displayId') || Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    let currentScreenType = displayId;
+    const rawDisplayId = (params.get('displayId') || params.get('screen') || '').replace(/^["']|["']$/g, '').trim();
+    const rawScreen = (params.get('screen') || '').replace(/^["']|["']$/g, '').trim();
+    const displayId = rawDisplayId || Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    let currentScreenType = rawScreen || displayId;
     let assignedContent = null;
     const canvaUrls = {
       en: params.get('canvaEn') || params.get('canva') || '',
@@ -44,6 +72,8 @@
 
     const imgEn = document.getElementById('img-en');
     const imgEs = document.getElementById('img-es');
+    const videoEn = document.getElementById('video-en');
+    const videoEs = document.getElementById('video-es');
     const embedFrame = document.getElementById('embed-frame');
     const statusEl = document.getElementById('status');
     let currentLanguage = 'en';
@@ -76,9 +106,7 @@
         return '';
       }
       return parsed.toString();
-    }
-
-    function getEmbedUrlForLanguage(lang) {
+    } function getEmbedUrlForLanguage(lang) {
       const source = assignedContent?.type === 'link' ? assignedContent : embedSource;
       if (!source) return '';
       const byLanguage = source.urls[lang];
@@ -100,25 +128,31 @@
       embedFrame.classList.add('visible');
       imgEn.classList.remove('visible');
       imgEs.classList.remove('visible');
+      videoEn.classList.remove('visible');
+      videoEs.classList.remove('visible');
+      videoEn.pause();
+      videoEs.pause();
       return true;
     }
 
-    function hasAssignedEmbeddedDisplay() {
-      return Boolean(
-        assignedContent &&
-        assignedContent.type === 'link' &&
-        assignedContent.urls &&
-        (assignedContent.urls.en || assignedContent.urls.es)
-      );
-    }
-
     function setAssignedContent(content) {
-      if (!content || content.type === 'asset') {
+      if (!content) {
         assignedContent = null;
+        return;
+      }
+      if (content.type === 'asset') {
+        assignedContent = {
+          type: 'asset',
+          mediaType: content.mediaType || 'image',
+          mediaTypes: content.mediaTypes || {},
+          files: content.files || {}
+        };
         return;
       }
       assignedContent = {
         type: 'link',
+        mediaType: content.mediaType || 'embed',
+        mediaTypes: content.mediaTypes || {},
         provider: String(content.provider || 'link'),
         urls: {
           en: String(content.urls?.en || ''),
@@ -127,41 +161,121 @@
       };
     }
 
-    function shouldUseEmbeddedDisplay() {
-      return hasAssignedEmbeddedDisplay() || hasQueryEmbeddedDisplay;
+    function getMediaTypeForLanguage(lang) {
+      if (!assignedContent) {
+        if (hasQueryEmbeddedDisplay) return 'embed';
+        return 'image';
+      }
+      if (assignedContent.mediaTypes && assignedContent.mediaTypes[lang]) {
+        return assignedContent.mediaTypes[lang];
+      }
+      if (assignedContent.type === 'asset') {
+        const file = assignedContent.files?.[lang] || '';
+        if (/\.(mp4|webm|mov|m4v)$/i.test(file)) return 'video';
+        if (/\.gif$/i.test(file)) return 'gif';
+        return 'image';
+      }
+      if (assignedContent.type === 'link') {
+        const url = assignedContent.urls?.[lang] || '';
+        if (assignedContent.provider === 'video' || /\.(mp4|webm|mov|m4v)($|\?)/i.test(url)) return 'video';
+        if (/\.gif($|\?)/i.test(url)) return 'gif';
+        if (/\.(png|jpg|jpeg|webp|svg)($|\?)/i.test(url)) return 'image';
+        return 'embed';
+      }
+      return 'image';
+    }
+
+    function updateMediaSources() {
+      const langEnType = getMediaTypeForLanguage('en');
+      const langEsType = getMediaTypeForLanguage('es');
+
+      if (assignedContent?.type === 'link') {
+        const srcEn = getValidDisplayUrl(assignedContent.urls?.en);
+        const srcEs = getValidDisplayUrl(assignedContent.urls?.es);
+        if (langEnType === 'video' && srcEn) {
+          if (videoEn.src !== new URL(srcEn, location.origin).href) videoEn.src = srcEn;
+        } else if (srcEn) {
+          imgEn.src = srcEn;
+        }
+        if (langEsType === 'video' && srcEs) {
+          if (videoEs.src !== new URL(srcEs, location.origin).href) videoEs.src = srcEs;
+        } else if (srcEs) {
+          imgEs.src = srcEs;
+        }
+      } else {
+        const fileEn = assignedContent?.files?.en || `${currentScreenType}-en.png`;
+        const fileEs = assignedContent?.files?.es || `${currentScreenType}-es.png`;
+
+        if (langEnType === 'video') {
+          const srcEn = `/assets/${fileEn}`;
+          if (videoEn.src !== new URL(srcEn, location.origin).href) videoEn.src = srcEn;
+        } else {
+          imgEn.src = `/assets/${fileEn}`;
+        }
+
+        if (langEsType === 'video') {
+          const srcEs = `/assets/${fileEs}`;
+          if (videoEs.src !== new URL(srcEs, location.origin).href) videoEs.src = srcEs;
+        } else {
+          imgEs.src = `/assets/${fileEs}`;
+        }
+      }
     }
 
     function setScreenType(screenType) {
       currentScreenType = screenType;
-      if (!shouldUseEmbeddedDisplay()) {
-        imgEn.src = `/assets/${screenType}-en.png`;
-        imgEs.src = `/assets/${screenType}-es.png`;
-        embedFrame.classList.remove('visible');
-      }
+      updateMediaSources();
       statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage})`;
     }
 
     function showLanguage(lang) {
       currentLanguage = lang;
-      if (shouldUseEmbeddedDisplay()) {
+      updateMediaSources();
+      const currentMediaType = getMediaTypeForLanguage(lang);
+
+      if (currentMediaType === 'embed') {
         const rendered = renderEmbed(lang);
         if (rendered) {
-          const sourceName = assignedContent?.provider || embedSource.name;
+          const sourceName = assignedContent?.provider || embedSource?.name || 'embed';
           statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage}, ${sourceName})`;
         }
         return;
       }
 
-      imgEn.classList.toggle('visible', lang === 'en');
-      imgEs.classList.toggle('visible', lang === 'es');
-      statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage})`;
+      embedFrame.classList.remove('visible');
+
+      const isEn = lang === 'en';
+      const isEs = lang === 'es';
+
+      const showVideoEn = isEn && currentMediaType === 'video';
+      const showVideoEs = isEs && currentMediaType === 'video';
+      const showImgEn = isEn && (currentMediaType === 'image' || currentMediaType === 'gif');
+      const showImgEs = isEs && (currentMediaType === 'image' || currentMediaType === 'gif');
+
+      videoEn.classList.toggle('visible', showVideoEn);
+      videoEs.classList.toggle('visible', showVideoEs);
+      imgEn.classList.toggle('visible', showImgEn);
+      imgEs.classList.toggle('visible', showImgEs);
+
+      if (showVideoEn) {
+        videoEn.play().catch(() => { });
+        videoEs.pause();
+      } else if (showVideoEs) {
+        videoEs.play().catch(() => { });
+        videoEn.pause();
+      } else {
+        videoEn.pause();
+        videoEs.pause();
+      }
+
+      statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage}, ${currentMediaType})`;
     }
 
     const socket = io();
 
     socket.on('connect', () => {
       statusEl.textContent = `${displayId} — connected`;
-      socket.emit('register-display', displayId);
+      socket.emit('register-display', { displayId, screenType: currentScreenType });
       socket.emit('request-state');
     });
 
@@ -195,4 +309,5 @@
     });
   </script>
 </body>
+
 </html>

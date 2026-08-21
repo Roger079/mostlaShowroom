@@ -7,6 +7,38 @@
         "en": "https://view.genially.com/66b043ebcc88dc4b8730d5e1",
         "es": "https://view.genially.com/669c529b079a5f29334d7444"
       }
+    },
+    {
+      "screenType": "libai",
+      "provider": "canva",
+      "urls": {
+        "en": "https://www.canva.com/design/DAGgzwJ5j3Q/O7uOd7-u52vsxlM0uF02uw/view?utm_content=DAGgzwJ5j3Q&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h0f60e14070#4",
+        "es": "https://www.canva.com/design/DAGgzwJ5j3Q/O7uOd7-u52vsxlM0uF02uw/view?utm_content=DAGgzwJ5j3Q&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h0f60e14070#4"
+      }
+    },
+    {
+      "screenType": "video_test",
+      "provider": "video",
+      "urls": {
+        "en": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+        "es": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"
+      }
+    },
+    {
+      "screenType": "ia",
+      "provider": "link",
+      "urls": {
+        "en": "https://xd.adobe.com/view/adb4a2db-e185-4700-9daf-832d06209641-f8e7/",
+        "es": "https://view.genially.com/66dfdaaed962683132b0ab17"
+      }
+    },
+    {
+      "screenType": "tecgpt",
+      "provider": "genially",
+      "urls": {
+        "en": "https://view.genially.com/698f4532d649d4b79c4ce6f5",
+        "es": "https://view.genially.com/6972b8a11ee5619d341427cf"
+      }
     }
   ]
 }
