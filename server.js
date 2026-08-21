@@ -17,7 +17,17 @@ app.use(express.json({ limit: '15mb' }));
 // this value immediately instead of waiting for the next toggle.
 let currentLanguage = 'en';
 const customContentPath = path.join(__dirname, 'data', 'custom-content.json');
+const greetingConfigPath = path.join(__dirname, 'data', 'greeting-config.json');
 const customLinks = new Map();
+
+let greetingState = {
+  enabled: false,
+  name: 'Guest',
+  titleEn: 'Welcome',
+  titleEs: '¡Bienvenido!',
+  subtitleEn: '',
+  subtitleEs: ''
+};
 
 // Track connected displays so the admin panel can show who's online.
 // Map of socket.id -> { screenId, screenType, connectedAt }
@@ -90,6 +100,34 @@ function saveCustomLinks() {
   fs.writeFileSync(customContentPath, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+function loadGreetingConfig() {
+  ensureDataDirectory();
+  if (!fs.existsSync(greetingConfigPath)) {
+    saveGreetingConfig();
+    return;
+  }
+
+  try {
+    const raw = fs.readFileSync(greetingConfigPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    greetingState = {
+      enabled: Boolean(parsed.enabled),
+      name: String(parsed.name || '').trim(),
+      titleEn: String(parsed.titleEn || 'Welcome').trim(),
+      titleEs: String(parsed.titleEs || '¡Bienvenido!').trim(),
+      subtitleEn: String(parsed.subtitleEn || '').trim(),
+      subtitleEs: String(parsed.subtitleEs || '').trim()
+    };
+  } catch (err) {
+    console.error('Failed to load greeting config:', err.message);
+  }
+}
+
+function saveGreetingConfig() {
+  ensureDataDirectory();
+  fs.writeFileSync(greetingConfigPath, JSON.stringify(greetingState, null, 2), 'utf8');
+}
+
 function getAssetsByScreenType() {
   const assetsDir = path.join(__dirname, 'public', 'assets');
   const result = new Map();
@@ -132,10 +170,11 @@ function getScreenTypes() {
 
 function getDefaultScreenType(screenId) {
   const screenTypes = getScreenTypes();
-  if (screenTypes.includes(screenId)) {
-    return screenId;
+  const normalizedScreenId = normalizeScreenType(screenId);
+  if (screenTypes.includes(normalizedScreenId)) {
+    return normalizedScreenId;
   }
-  return screenTypes[0] || screenId;
+  return screenTypes[0] || normalizedScreenId;
 }
 
 function broadcastDisplayList() {
@@ -148,6 +187,25 @@ function broadcastDisplayList() {
   io.emit('display-list', list);
 }
 
+function getAssetFiles(screenType) {
+  const assetsDir = path.join(__dirname, 'public', 'assets');
+  const files = {};
+  if (!fs.existsSync(assetsDir)) {
+    return files;
+  }
+
+  const dirFiles = fs.readdirSync(assetsDir, { withFileTypes: true });
+  for (const file of dirFiles) {
+    if (!file.isFile()) continue;
+    const baseName = path.parse(file.name).name;
+    const parsed = parseContentLanguage(baseName);
+    if (parsed && parsed.prefix === screenType) {
+      files[parsed.lang] = file.name;
+    }
+  }
+  return files;
+}
+
 function getContentConfig(screenType) {
   const linkConfig = customLinks.get(screenType);
   if (linkConfig) {
@@ -158,7 +216,8 @@ function getContentConfig(screenType) {
     };
   }
   return {
-    type: 'asset'
+    type: 'asset',
+    files: getAssetFiles(screenType)
   };
 }
 
@@ -281,25 +340,66 @@ app.delete('/custom-contents/:screenType', (req, res) => {
   return res.json({ ok: true });
 });
 
+app.get('/greeting-config', (_req, res) => {
+  res.json(greetingState);
+});
+
+app.post('/greeting-config', (req, res) => {
+  const data = req.body || {};
+  greetingState = {
+    enabled: Boolean(data.enabled),
+    name: String(data.name || '').trim(),
+    titleEn: String(data.titleEn || 'Welcome').trim(),
+    titleEs: String(data.titleEs || '¡Bienvenido!').trim(),
+    subtitleEn: String(data.subtitleEn || '').trim(),
+    subtitleEs: String(data.subtitleEs || '').trim()
+  };
+  saveGreetingConfig();
+  io.emit('greeting-changed', greetingState);
+  return res.json({ ok: true, greeting: greetingState });
+});
+
 loadCustomLinks();
+loadGreetingConfig();
 
 io.on('connection', (socket) => {
   // A client tells us what kind of client it is right after connecting.
-  socket.on('register-display', (screenId) => {
-    const screenType = getDefaultScreenType(screenId);
+  socket.on('register-display', (payload) => {
+    const displayId = typeof payload === 'object' && payload
+      ? payload.displayId || payload.screenId || payload.screenType
+      : payload;
+    const requestedScreenType = typeof payload === 'object' && payload
+      ? payload.screenType
+      : null;
+    const screenType = getDefaultScreenType(requestedScreenType || displayId);
     displays.set(socket.id, {
       socketId: socket.id,
-      screenId,
+      screenId: String(displayId || socket.id),
       screenType,
       connectedAt: Date.now()
     });
-    socket.emit('display-config', { screenType, language: currentLanguage, content: getContentConfig(screenType) });
+    socket.emit('display-config', { screenType, language: currentLanguage, content: getContentConfig(screenType), greeting: greetingState });
     broadcastDisplayList();
   });
 
   // Any client (display or admin) can ask for current state on load/reconnect.
   socket.on('request-state', () => {
     socket.emit('language-changed', currentLanguage);
+    socket.emit('greeting-changed', greetingState);
+  });
+
+  socket.on('set-greeting', (data) => {
+    if (typeof data !== 'object' || !data) return;
+    greetingState = {
+      enabled: Boolean(data.enabled),
+      name: String(data.name || '').trim(),
+      titleEn: String(data.titleEn || 'Welcome').trim(),
+      titleEs: String(data.titleEs || '¡Bienvenido!').trim(),
+      subtitleEn: String(data.subtitleEn || '').trim(),
+      subtitleEs: String(data.subtitleEs || '').trim()
+    };
+    saveGreetingConfig();
+    io.emit('greeting-changed', greetingState);
   });
 
   socket.on('request-display-list', () => {
