@@ -9,6 +9,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use((_req, res, next) => {
+  res.setHeader('ngrok-skip-browser-warning', 'true');
+  next();
+});
 app.use(express.static('public'));
 app.use(express.json({ limit: '15mb' }));
 

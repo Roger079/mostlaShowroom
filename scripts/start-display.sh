@@ -45,17 +45,40 @@ SERVER_URL=$(grep -o '"serverUrl": "[^"]*' "$CONFIG_FILE" | grep -o '[^"]*$')
 TARGET_URL="$SERVER_URL/display.html?displayId=$DISPLAY_NAME&screen=$DISPLAY_NAME"
 echo "Starting Signage Display ($DISPLAY_NAME) pointing to $TARGET_URL..."
 
-if command -v chromium-browser &> /dev/null; then
-    chromium-browser --kiosk "$TARGET_URL" --noerrdialogs --disable-infobars --no-first-run --autoplay-policy=no-user-gesture-required
-elif command -v google-chrome &> /dev/null; then
-    google-chrome --kiosk "$TARGET_URL" --noerrdialogs --disable-infobars --no-first-run --autoplay-policy=no-user-gesture-required
+# Discover Chrome / Chromium binary (including macOS paths)
+CHROME_BIN=""
+
+if [ "$(uname)" == "Darwin" ]; then
+    if [ -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+        CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    elif [ -f "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" ]; then
+        CHROME_BIN="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+    elif [ -f "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" ]; then
+        CHROME_BIN="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+    fi
+fi
+
+if [ -z "$CHROME_BIN" ]; then
+    if command -v chromium-browser &> /dev/null; then
+        CHROME_BIN="chromium-browser"
+    elif command -v google-chrome &> /dev/null; then
+        CHROME_BIN="google-chrome"
+    elif command -v chrome &> /dev/null; then
+        CHROME_BIN="chrome"
+    fi
+fi
+
+if [ -n "$CHROME_BIN" ]; then
+    echo "Launching fullscreen browser: $CHROME_BIN"
+    "$CHROME_BIN" --kiosk "$TARGET_URL" --noerrdialogs --disable-infobars --no-first-run --autoplay-policy=no-user-gesture-required
 elif command -v firefox &> /dev/null; then
+    echo "Launching fullscreen Firefox..."
     firefox --kiosk "$TARGET_URL"
 else
-    echo "No browser found. Opening with xdg-open/open..."
-    if command -v xdg-open &> /dev/null; then
-        xdg-open "$TARGET_URL"
-    elif command -v open &> /dev/null; then
+    echo "No standard browser binary found in PATH. Opening default browser..."
+    if command -v open &> /dev/null; then
         open "$TARGET_URL"
+    elif command -v xdg-open &> /dev/null; then
+        xdg-open "$TARGET_URL"
     fi
 fi
