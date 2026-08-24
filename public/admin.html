@@ -37,13 +37,51 @@
     width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 6px;
   }
   .muted { color: #777; font-size: 12px; }
-  .content-actions { display: flex; gap: 8px; margin-top: 12px; }
-  .danger { background: #fff5f5; border-color: #f1b5b5; color: #a20000; }
-  #content-message { min-height: 18px; margin-top: 8px; font-size: 12px; }
+  .header-bar { display: flex; justify-content: space-between; align-items: center; }
+  .logout-btn { padding: 6px 12px; font-size: 13px; background: #fff5f5; border: 1px solid #f1b5b5; color: #a20000; border-radius: 6px; cursor: pointer; flex: initial; }
+  .login-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center; z-index: 9999;
+  }
+  .login-card {
+    background: #ffffff; border-radius: 12px; padding: 32px 28px; width: 100%; max-width: 360px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+    text-align: center; box-sizing: border-box;
+  }
+  .login-card h2 { font-size: 20px; margin-top: 0; margin-bottom: 8px; color: #0F172A; }
+  .login-card p { font-size: 13px; color: #64748B; margin-bottom: 20px; margin-top: 0; }
+  .login-card input {
+    width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 15px; border: 1px solid #CBD5E1;
+    border-radius: 8px; margin-bottom: 16px; transition: border-color 0.2s;
+  }
+  .login-card input:focus { border-color: #0F6E56; outline: none; box-shadow: 0 0 0 3px rgba(15, 110, 86, 0.15); }
+  .login-card button {
+    width: 100%; padding: 12px; font-size: 15px; font-weight: 600; border-radius: 8px;
+    background: #0F6E56; color: #ffffff; border: none; cursor: pointer;
+  }
+  .login-card button:hover { background: #0c5643; }
+  .login-error { color: #dc2626; font-size: 13px; margin-top: 12px; min-height: 18px; }
 </style>
 </head>
 <body>
-  <h1>Showroom admin</h1>
+  <!-- Admin Authentication Modal -->
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <h2>Admin Authentication</h2>
+      <p>Please enter the admin password to access controls.</p>
+      <form id="login-form">
+        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" required>
+        <button type="submit" id="login-submit-btn">Unlock Admin</button>
+        <div id="login-error" class="login-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="header-bar">
+    <h1>Showroom admin</h1>
+    <button id="logout-btn" class="logout-btn" style="display:none;">Log Out</button>
+  </div>
   <div class="tabs">
     <button id="tab-control" class="tab-btn active">Language Control</button>
     <button id="tab-greeting" class="tab-btn">Greeting Control</button>
@@ -219,6 +257,93 @@
     let connectedDisplays = [];
     let customContents = [];
 
+    // Authentication State & UI
+    let adminToken = sessionStorage.getItem('adminToken') || '';
+    const loginOverlay = document.getElementById('login-overlay');
+    const loginForm = document.getElementById('login-form');
+    const loginPassword = document.getElementById('login-password');
+    const loginError = document.getElementById('login-error');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    function authHeaders() {
+      return {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    function showLoginOverlay() {
+      loginOverlay.style.display = 'flex';
+      logoutBtn.style.display = 'none';
+      loginPassword.value = '';
+      loginError.textContent = '';
+      setTimeout(() => loginPassword.focus(), 100);
+    }
+
+    function hideLoginOverlay() {
+      loginOverlay.style.display = 'none';
+      logoutBtn.style.display = 'inline-block';
+    }
+
+    async function checkAuth() {
+      if (!adminToken) {
+        showLoginOverlay();
+        return false;
+      }
+      try {
+        const res = await fetch('/api/auth-check', {
+          headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+        const data = await res.json();
+        if (data.authenticated) {
+          hideLoginOverlay();
+          return true;
+        }
+      } catch (err) {
+        console.error('Auth check failed:', err);
+      }
+      showLoginOverlay();
+      return false;
+    }
+
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const password = loginPassword.value;
+      loginError.textContent = '';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          adminToken = data.token;
+          sessionStorage.setItem('adminToken', adminToken);
+          hideLoginOverlay();
+          refreshAdminData().catch((err) => setContentMessage(err.message, true));
+        } else {
+          loginError.textContent = data.error || 'Invalid password';
+        }
+      } catch (err) {
+        loginError.textContent = 'Connection error. Please try again.';
+      }
+    };
+
+    logoutBtn.onclick = async () => {
+      if (adminToken) {
+        try {
+          await fetch('/api/logout', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${adminToken}` }
+          });
+        } catch (e) {}
+      }
+      adminToken = '';
+      sessionStorage.removeItem('adminToken');
+      showLoginOverlay();
+    };
+
     function escapeHtml(value) {
       return String(value)
         .replaceAll('&', '&amp;')
@@ -361,7 +486,7 @@
       };
       const response = await fetch('/custom-contents/link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
@@ -382,7 +507,7 @@
         const dataUrl = await readFileAsDataUrl(item.file);
         const response = await fetch('/custom-contents/png', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
           body: JSON.stringify({
             screenType,
             language: item.lang,
@@ -410,7 +535,8 @@
 
     async function deleteContent(screenType) {
       const response = await fetch(`/custom-contents/${encodeURIComponent(screenType)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${adminToken}` }
       });
       if (!response.ok) {
         const body = await response.json();
@@ -467,8 +593,8 @@
       };
     }
 
-    btnEn.onclick = () => socket.emit('set-language', 'en');
-    btnEs.onclick = () => socket.emit('set-language', 'es');
+    btnEn.onclick = () => socket.emit('set-language', { lang: 'en', token: adminToken });
+    btnEs.onclick = () => socket.emit('set-language', { lang: 'es', token: adminToken });
     tabControl.onclick = () => showTab('control');
     tabGreeting.onclick = () => showTab('greeting');
     tabContent.onclick = () => showTab('content');
@@ -481,6 +607,7 @@
 
     saveGreetingBtn.onclick = () => {
       const payload = getGreetingPayload();
+      payload.token = adminToken;
       socket.emit('set-greeting', payload);
       setGreetingMessage('Greeting updated and broadcasted!', false);
     };
@@ -488,6 +615,7 @@
     disableGreetingBtn.onclick = () => {
       greetingEnabledEl.checked = false;
       const payload = getGreetingPayload(false);
+      payload.token = adminToken;
       socket.emit('set-greeting', payload);
       updateGreetingPreview();
       setGreetingMessage('Greeting disabled.', false);
@@ -531,7 +659,8 @@
 
       socket.emit('set-display-screen-type', {
         socketId: select.dataset.socketId,
-        screenType: select.value
+        screenType: select.value,
+        token: adminToken
       });
     });
 
@@ -560,7 +689,11 @@
       }
     });
 
-    refreshAdminData().catch((error) => setContentMessage(error.message, true));
+    checkAuth().then((authenticated) => {
+      if (authenticated) {
+        refreshAdminData().catch((error) => setContentMessage(error.message, true));
+      }
+    });
   </script>
 </body>
 </html>

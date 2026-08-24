@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,6 +11,45 @@ const io = new Server(server);
 
 app.use(express.static('public'));
 app.use(express.json({ limit: '15mb' }));
+
+// ---- Security & Authentication ----
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const activeSessions = new Set();
+
+function generateSessionToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function extractToken(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7).trim();
+  }
+  if (req.headers['x-admin-token']) {
+    return req.headers['x-admin-token'];
+  }
+  if (req.query && req.query.token) {
+    return req.query.token;
+  }
+  return null;
+}
+
+function isValidToken(token) {
+  return Boolean(token && activeSessions.has(token));
+}
+
+function requireAdminAuth(req, res, next) {
+  const token = extractToken(req);
+  if (!isValidToken(token)) {
+    return res.status(401).json({ error: 'Unauthorized: Valid admin token required' });
+  }
+  next();
+}
+
+function isSocketAuthenticated(socket, payloadToken) {
+  const token = socket.handshake.auth?.token || payloadToken;
+  return isValidToken(token);
+}
 
 // ---- In-memory state ----
 // Current global language. This is what fixes the "reconnect shows stale
@@ -221,6 +261,30 @@ function getContentConfig(screenType) {
   };
 }
 
+// Auth Endpoints
+app.post('/api/login', (req, res) => {
+  const { password } = req.body || {};
+  if (password === ADMIN_PASSWORD) {
+    const token = generateSessionToken();
+    activeSessions.add(token);
+    return res.json({ ok: true, token });
+  }
+  return res.status(401).json({ error: 'Invalid admin password' });
+});
+
+app.post('/api/logout', (req, res) => {
+  const token = extractToken(req);
+  if (token) {
+    activeSessions.delete(token);
+  }
+  return res.json({ ok: true });
+});
+
+app.get('/api/auth-check', (req, res) => {
+  const token = extractToken(req);
+  return res.json({ authenticated: isValidToken(token) });
+});
+
 app.get('/screen-types', (_req, res) => {
   res.type('text/plain').send(getScreenTypes().join(','));
 });
@@ -252,7 +316,7 @@ app.get('/custom-contents', (_req, res) => {
   res.json(rows);
 });
 
-app.post('/custom-contents/link', (req, res) => {
+app.post('/custom-contents/link', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.body?.screenType);
   const provider = String(req.body?.provider || 'link').trim().toLowerCase();
   const urlEn = String(req.body?.urlEn || '').trim();
@@ -277,7 +341,7 @@ app.post('/custom-contents/link', (req, res) => {
   return res.status(201).json({ ok: true, screenType });
 });
 
-app.post('/custom-contents/png', (req, res) => {
+app.post('/custom-contents/png', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.body?.screenType);
   const language = String(req.body?.language || '').trim().toLowerCase();
   const dataUrl = String(req.body?.dataUrl || '');
@@ -305,7 +369,7 @@ app.post('/custom-contents/png', (req, res) => {
   return res.status(201).json({ ok: true, file: outputName });
 });
 
-app.delete('/custom-contents/:screenType', (req, res) => {
+app.delete('/custom-contents/:screenType', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.params.screenType);
   if (!screenType) {
     return res.status(400).json({ error: 'screenType is required' });
@@ -344,7 +408,7 @@ app.get('/greeting-config', (_req, res) => {
   res.json(greetingState);
 });
 
-app.post('/greeting-config', (req, res) => {
+app.post('/greeting-config', requireAdminAuth, (req, res) => {
   const data = req.body || {};
   greetingState = {
     enabled: Boolean(data.enabled),
@@ -390,6 +454,8 @@ io.on('connection', (socket) => {
 
   socket.on('set-greeting', (data) => {
     if (typeof data !== 'object' || !data) return;
+    const token = data.token;
+    if (!isSocketAuthenticated(socket, token)) return;
     greetingState = {
       enabled: Boolean(data.enabled),
       name: String(data.name || '').trim(),
@@ -413,13 +479,19 @@ io.on('connection', (socket) => {
   });
 
   // Admin panel emits this when someone clicks English / Español.
-  socket.on('set-language', (lang) => {
+  socket.on('set-language', (payload) => {
+    const lang = typeof payload === 'object' && payload ? payload.lang : payload;
+    const token = typeof payload === 'object' && payload ? payload.token : null;
+    if (!isSocketAuthenticated(socket, token)) return;
     if (lang !== 'en' && lang !== 'es') return; // basic validation
     currentLanguage = lang;
     io.emit('language-changed', currentLanguage);
   });
 
-  socket.on('set-display-screen-type', ({ socketId, screenType }) => {
+  socket.on('set-display-screen-type', (payload) => {
+    if (typeof payload !== 'object' || !payload) return;
+    const { socketId, screenType, token } = payload;
+    if (!isSocketAuthenticated(socket, token)) return;
     const display = displays.get(socketId);
     if (!display) return;
 
