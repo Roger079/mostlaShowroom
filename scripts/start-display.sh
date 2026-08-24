@@ -46,8 +46,18 @@ TARGET_URL="$SERVER_URL/display.html?displayId=$DISPLAY_NAME&screen=$DISPLAY_NAM
 echo "Starting Signage Display ($DISPLAY_NAME) pointing to $TARGET_URL..."
 
 if [ "$(uname)" == "Darwin" ]; then
-    echo "Launching Safari on macOS pointing to $TARGET_URL..."
+    echo "Launching Safari on macOS in Fullscreen mode..."
     open -a Safari "$TARGET_URL"
+    sleep 1
+    osascript -e '
+    tell application "Safari"
+        activate
+        delay 0.5
+        tell application "System Events"
+            keystroke "f" using {command down, control down}
+        end tell
+    end tell
+    '
     exit 0
 fi
 
