@@ -40,57 +40,6 @@
       border-radius: 4px;
       z-index: 101;
     }
-
-    #greeting-overlay {
-      position: absolute;
-      top: 32px;
-      left: 50%;
-      transform: translateX(-50%) translateY(-20px);
-      z-index: 100;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-
-    #greeting-overlay.visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-
-    .greeting-card {
-      background: rgba(15, 23, 42, 0.82);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-      border-radius: 16px;
-      padding: 14px 36px;
-      max-width: 85vw;
-      color: #fff;
-    }
-
-    .greeting-title {
-      font-size: 32px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      background: linear-gradient(135deg, #ffffff 0%, #38bdf8 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    }
-
-    .greeting-subtitle {
-      font-size: 18px;
-      font-weight: 400;
-      color: #cbd5e1;
-      margin-top: 4px;
-      letter-spacing: 0.2px;
-    }
   </style>
 </head>
 
@@ -100,12 +49,6 @@
   <video id="video-en" class="layer" autoplay loop muted playsinline></video>
   <video id="video-es" class="layer" autoplay loop muted playsinline></video>
   <iframe id="embed-frame" class="layer" title="Embedded display" frameborder="0" allowfullscreen></iframe>
-  <div id="greeting-overlay">
-    <div class="greeting-card">
-      <div id="greeting-title" class="greeting-title">Welcome</div>
-      <div id="greeting-subtitle" class="greeting-subtitle"></div>
-    </div>
-  </div>
   <div id="status">connecting…</div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -135,41 +78,6 @@
     const embedFrame = document.getElementById('embed-frame');
     const statusEl = document.getElementById('status');
     let currentLanguage = 'en';
-    let greetingConfig = null;
-
-    function renderGreeting() {
-      const overlay = document.getElementById('greeting-overlay');
-      const titleEl = document.getElementById('greeting-title');
-      const subtitleEl = document.getElementById('greeting-subtitle');
-
-      if (!greetingConfig || !greetingConfig.enabled) {
-        overlay.classList.remove('visible');
-        return;
-      }
-
-      const isEn = currentLanguage === 'en';
-      const name = (greetingConfig.name || '').trim();
-      const rawTitle = (isEn ? greetingConfig.titleEn : greetingConfig.titleEs) || (isEn ? 'Welcome' : '¡Bienvenido!');
-      const rawSubtitle = (isEn ? greetingConfig.subtitleEn : greetingConfig.subtitleEs) || '';
-
-      const fullTitle = name ? `${rawTitle} ${name}` : rawTitle;
-      titleEl.textContent = fullTitle;
-
-      if (rawSubtitle) {
-        subtitleEl.textContent = rawSubtitle;
-        subtitleEl.style.display = 'block';
-      } else {
-        subtitleEl.style.display = 'none';
-      }
-
-      overlay.classList.add('visible');
-    }
-
-    function setGreetingConfig(config) {
-      if (!config) return;
-      greetingConfig = config;
-      renderGreeting();
-    }
 
     function getEmbedSource() {
       if (embedProviderParam === 'genially' && hasGeniallyDisplay) {
@@ -323,7 +231,6 @@
 
     function showLanguage(lang) {
       currentLanguage = lang;
-      renderGreeting();
       updateMediaSources();
       const currentMediaType = getMediaTypeForLanguage(lang);
 
@@ -377,19 +284,14 @@
       statusEl.textContent = `${displayId} — disconnected, retrying…`;
     });
 
-    socket.on('display-config', ({ screenType, language, content, greeting }) => {
+    socket.on('display-config', ({ screenType, language, content }) => {
       setAssignedContent(content);
-      if (greeting) setGreetingConfig(greeting);
       if (screenType) setScreenType(screenType);
       if (language) showLanguage(language);
     });
 
     socket.on('language-changed', (lang) => {
       showLanguage(lang);
-    });
-
-    socket.on('greeting-changed', (greeting) => {
-      setGreetingConfig(greeting);
     });
 
     socket.on('screen-type-changed', (payload) => {

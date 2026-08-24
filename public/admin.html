@@ -84,7 +84,6 @@
   </div>
   <div class="tabs">
     <button id="tab-control" class="tab-btn active">Language Control</button>
-    <button id="tab-greeting" class="tab-btn">Greeting Control</button>
     <button id="tab-content" class="tab-btn">Content Library</button>
   </div>
 
@@ -100,64 +99,6 @@
       <h2 style="font-size:16px;">Connected displays</h2>
       <div id="display-list"><span id="empty">No displays connected yet</span></div>
     </div>
-  </section>
-
-  <section id="panel-greeting" class="tab-panel">
-    <h2 style="font-size:16px;">Custom Greeting Overlay</h2>
-    
-    <div class="content-row" style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
-      <input type="checkbox" id="greeting-enabled" style="width:auto; cursor:pointer;">
-      <label for="greeting-enabled" style="margin-bottom:0; cursor:pointer; font-weight:600; font-size:14px;">Enable Greeting on Displays</label>
-    </div>
-
-    <div class="content-row">
-      <label for="greeting-name">Visitor / Guest Name</label>
-      <input id="greeting-name" placeholder="e.g. Tec de Monterrey, John Doe">
-    </div>
-
-    <div class="content-row">
-      <label for="greeting-title-en">Greeting Title (English)</label>
-      <input id="greeting-title-en" placeholder="Welcome">
-    </div>
-
-    <div class="content-row">
-      <label for="greeting-title-es">Greeting Title (Spanish)</label>
-      <input id="greeting-title-es" placeholder="¡Bienvenido!">
-    </div>
-
-    <div class="content-row">
-      <label for="greeting-subtitle-en">Optional Subtitle (English)</label>
-      <input id="greeting-subtitle-en" placeholder="e.g. Glad to have you here today">
-    </div>
-
-    <div class="content-row">
-      <label for="greeting-subtitle-es">Optional Subtitle (Spanish)</label>
-      <input id="greeting-subtitle-es" placeholder="e.g. Nos alegra tenerte aquí hoy">
-    </div>
-
-    <div style="margin: 16px 0;">
-      <label style="font-size:12px; color:#444; margin-bottom:4px; display:block;">Quick Presets</label>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <button type="button" class="preset-btn" data-title-en="Welcome" data-title-es="¡Bienvenido!" style="padding:6px 10px; font-size:12px;">Standard</button>
-        <button type="button" class="preset-btn" data-title-en="Welcome to Mostla" data-title-es="¡Bienvenidos a Mostla!" style="padding:6px 10px; font-size:12px;">Mostla</button>
-        <button type="button" class="preset-btn" data-title-en="Special Guest" data-title-es="Invitado Especial" style="padding:6px 10px; font-size:12px;">Special Guest</button>
-      </div>
-    </div>
-
-    <!-- Live Preview Card -->
-    <div style="background:#0F172A; border-radius:8px; padding:12px; margin: 16px 0; color:#fff; font-size:13px;">
-      <div style="font-size:11px; color:#94A3B8; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">Live Banner Preview</div>
-      <div id="greeting-preview-box" style="border: 1px solid rgba(56, 189, 248, 0.3); border-radius:6px; padding:10px; background:rgba(255,255,255,0.05); text-align:center;">
-        <div id="preview-title" style="font-size:16px; font-weight:700; color:#38BDF8;">Welcome, Guest</div>
-        <div id="preview-subtitle" style="font-size:12px; color:#CBD5E1; margin-top:2px;"></div>
-      </div>
-    </div>
-
-    <div class="content-actions">
-      <button id="save-greeting-btn">Save & Broadcast Greeting</button>
-      <button id="disable-greeting-btn" class="danger">Disable Greeting</button>
-    </div>
-    <div id="greeting-message" style="min-height:18px; margin-top:8px; font-size:12px;"></div>
   </section>
 
   <section id="panel-content" class="tab-panel">
@@ -217,10 +158,8 @@
   <script>
     const socket = io();
     const tabControl = document.getElementById('tab-control');
-    const tabGreeting = document.getElementById('tab-greeting');
     const tabContent = document.getElementById('tab-content');
     const panelControl = document.getElementById('panel-control');
-    const panelGreeting = document.getElementById('panel-greeting');
     const panelContent = document.getElementById('panel-content');
     const btnEn = document.getElementById('btn-en');
     const btnEs = document.getElementById('btn-es');
@@ -239,20 +178,7 @@
     const linkFieldsEl = document.getElementById('link-fields');
     const pngFieldsEl = document.getElementById('png-fields');
 
-    // Greeting elements
-    const greetingEnabledEl = document.getElementById('greeting-enabled');
-    const greetingNameEl = document.getElementById('greeting-name');
-    const greetingTitleEnEl = document.getElementById('greeting-title-en');
-    const greetingTitleEsEl = document.getElementById('greeting-title-es');
-    const greetingSubtitleEnEl = document.getElementById('greeting-subtitle-en');
-    const greetingSubtitleEsEl = document.getElementById('greeting-subtitle-es');
-    const previewTitleEl = document.getElementById('preview-title');
-    const previewSubtitleEl = document.getElementById('preview-subtitle');
-    const saveGreetingBtn = document.getElementById('save-greeting-btn');
-    const disableGreetingBtn = document.getElementById('disable-greeting-btn');
-    const greetingMessageEl = document.getElementById('greeting-message');
     let currentLang = 'en';
-    let currentGreeting = null;
     let screenTypes = [];
     let connectedDisplays = [];
     let customContents = [];
@@ -358,15 +284,12 @@
       btnEn.classList.toggle('active', lang === 'en');
       btnEs.classList.toggle('active', lang === 'es');
       currentLangEl.textContent = lang === 'en' ? 'English' : 'Español';
-      updateGreetingPreview();
     }
 
     function showTab(tabName) {
       tabControl.classList.toggle('active', tabName === 'control');
-      tabGreeting.classList.toggle('active', tabName === 'greeting');
       tabContent.classList.toggle('active', tabName === 'content');
       panelControl.classList.toggle('active', tabName === 'control');
-      panelGreeting.classList.toggle('active', tabName === 'greeting');
       panelContent.classList.toggle('active', tabName === 'content');
     }
 
@@ -544,90 +467,11 @@
       }
     }
 
-    function setGreetingMessage(msg, isError) {
-      greetingMessageEl.textContent = msg;
-      greetingMessageEl.style.color = isError ? '#a20000' : '#0F6E56';
-    }
-
-    function updateGreetingPreview() {
-      const isEn = currentLang === 'en';
-      const name = greetingNameEl.value.trim() || 'Guest';
-      const title = (isEn ? greetingTitleEnEl.value : greetingTitleEsEl.value).trim() || (isEn ? 'Welcome' : '¡Bienvenido!');
-      const subtitle = (isEn ? greetingSubtitleEnEl.value : greetingSubtitleEsEl.value).trim();
-      const isEnabled = greetingEnabledEl.checked;
-
-      previewTitleEl.textContent = name ? `${title} ${name}` : title;
-      previewSubtitleEl.textContent = subtitle;
-      previewSubtitleEl.style.display = subtitle ? 'block' : 'none';
-      
-      const previewBox = document.getElementById('greeting-preview-box');
-      if (isEnabled) {
-        previewBox.style.opacity = '1';
-        previewBox.style.borderColor = 'rgba(56, 189, 248, 0.6)';
-      } else {
-        previewBox.style.opacity = '0.4';
-        previewBox.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-      }
-    }
-
-    function populateGreetingForm(greeting) {
-      if (!greeting) return;
-      currentGreeting = greeting;
-      greetingEnabledEl.checked = Boolean(greeting.enabled);
-      greetingNameEl.value = greeting.name || '';
-      greetingTitleEnEl.value = greeting.titleEn || 'Welcome';
-      greetingTitleEsEl.value = greeting.titleEs || '¡Bienvenido!';
-      greetingSubtitleEnEl.value = greeting.subtitleEn || '';
-      greetingSubtitleEsEl.value = greeting.subtitleEs || '';
-      updateGreetingPreview();
-    }
-
-    function getGreetingPayload(overrideEnabled) {
-      return {
-        enabled: overrideEnabled !== undefined ? overrideEnabled : greetingEnabledEl.checked,
-        name: greetingNameEl.value.trim(),
-        titleEn: greetingTitleEnEl.value.trim() || 'Welcome',
-        titleEs: greetingTitleEsEl.value.trim() || '¡Bienvenido!',
-        subtitleEn: greetingSubtitleEnEl.value.trim(),
-        subtitleEs: greetingSubtitleEsEl.value.trim()
-      };
-    }
-
     btnEn.onclick = () => socket.emit('set-language', { lang: 'en', token: adminToken });
     btnEs.onclick = () => socket.emit('set-language', { lang: 'es', token: adminToken });
     tabControl.onclick = () => showTab('control');
-    tabGreeting.onclick = () => showTab('greeting');
     tabContent.onclick = () => showTab('content');
     contentTypeEl.onchange = updateContentFields;
-
-    [greetingEnabledEl, greetingNameEl, greetingTitleEnEl, greetingTitleEsEl, greetingSubtitleEnEl, greetingSubtitleEsEl].forEach(input => {
-      input.addEventListener('input', updateGreetingPreview);
-      input.addEventListener('change', updateGreetingPreview);
-    });
-
-    saveGreetingBtn.onclick = () => {
-      const payload = getGreetingPayload();
-      payload.token = adminToken;
-      socket.emit('set-greeting', payload);
-      setGreetingMessage('Greeting updated and broadcasted!', false);
-    };
-
-    disableGreetingBtn.onclick = () => {
-      greetingEnabledEl.checked = false;
-      const payload = getGreetingPayload(false);
-      payload.token = adminToken;
-      socket.emit('set-greeting', payload);
-      updateGreetingPreview();
-      setGreetingMessage('Greeting disabled.', false);
-    };
-
-    panelGreeting.addEventListener('click', (e) => {
-      const btn = e.target.closest('.preset-btn');
-      if (!btn) return;
-      greetingTitleEnEl.value = btn.dataset.titleEn || 'Welcome';
-      greetingTitleEsEl.value = btn.dataset.titleEs || '¡Bienvenido!';
-      updateGreetingPreview();
-    });
 
     saveContentBtn.onclick = async () => {
       saveContentBtn.disabled = true;
@@ -648,7 +492,6 @@
       socket.emit('request-display-list');
     });
     socket.on('language-changed', setActive);
-    socket.on('greeting-changed', populateGreetingForm);
     socket.on('content-library-changed', () => {
       refreshAdminData().catch((error) => setContentMessage(error.message, true));
     });

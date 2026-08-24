@@ -57,17 +57,7 @@ function isSocketAuthenticated(socket, payloadToken) {
 // this value immediately instead of waiting for the next toggle.
 let currentLanguage = 'en';
 const customContentPath = path.join(__dirname, 'data', 'custom-content.json');
-const greetingConfigPath = path.join(__dirname, 'data', 'greeting-config.json');
 const customLinks = new Map();
-
-let greetingState = {
-  enabled: false,
-  name: 'Guest',
-  titleEn: 'Welcome',
-  titleEs: '¡Bienvenido!',
-  subtitleEn: '',
-  subtitleEs: ''
-};
 
 // Track connected displays so the admin panel can show who's online.
 // Map of socket.id -> { screenId, screenType, connectedAt }
@@ -138,34 +128,6 @@ function saveCustomLinks() {
     }))
   };
   fs.writeFileSync(customContentPath, JSON.stringify(payload, null, 2), 'utf8');
-}
-
-function loadGreetingConfig() {
-  ensureDataDirectory();
-  if (!fs.existsSync(greetingConfigPath)) {
-    saveGreetingConfig();
-    return;
-  }
-
-  try {
-    const raw = fs.readFileSync(greetingConfigPath, 'utf8');
-    const parsed = JSON.parse(raw);
-    greetingState = {
-      enabled: Boolean(parsed.enabled),
-      name: String(parsed.name || '').trim(),
-      titleEn: String(parsed.titleEn || 'Welcome').trim(),
-      titleEs: String(parsed.titleEs || '¡Bienvenido!').trim(),
-      subtitleEn: String(parsed.subtitleEn || '').trim(),
-      subtitleEs: String(parsed.subtitleEs || '').trim()
-    };
-  } catch (err) {
-    console.error('Failed to load greeting config:', err.message);
-  }
-}
-
-function saveGreetingConfig() {
-  ensureDataDirectory();
-  fs.writeFileSync(greetingConfigPath, JSON.stringify(greetingState, null, 2), 'utf8');
 }
 
 function getAssetsByScreenType() {
@@ -404,27 +366,7 @@ app.delete('/custom-contents/:screenType', requireAdminAuth, (req, res) => {
   return res.json({ ok: true });
 });
 
-app.get('/greeting-config', (_req, res) => {
-  res.json(greetingState);
-});
-
-app.post('/greeting-config', requireAdminAuth, (req, res) => {
-  const data = req.body || {};
-  greetingState = {
-    enabled: Boolean(data.enabled),
-    name: String(data.name || '').trim(),
-    titleEn: String(data.titleEn || 'Welcome').trim(),
-    titleEs: String(data.titleEs || '¡Bienvenido!').trim(),
-    subtitleEn: String(data.subtitleEn || '').trim(),
-    subtitleEs: String(data.subtitleEs || '').trim()
-  };
-  saveGreetingConfig();
-  io.emit('greeting-changed', greetingState);
-  return res.json({ ok: true, greeting: greetingState });
-});
-
 loadCustomLinks();
-loadGreetingConfig();
 
 io.on('connection', (socket) => {
   // A client tells us what kind of client it is right after connecting.
@@ -442,30 +384,13 @@ io.on('connection', (socket) => {
       screenType,
       connectedAt: Date.now()
     });
-    socket.emit('display-config', { screenType, language: currentLanguage, content: getContentConfig(screenType), greeting: greetingState });
+    socket.emit('display-config', { screenType, language: currentLanguage, content: getContentConfig(screenType) });
     broadcastDisplayList();
   });
 
   // Any client (display or admin) can ask for current state on load/reconnect.
   socket.on('request-state', () => {
     socket.emit('language-changed', currentLanguage);
-    socket.emit('greeting-changed', greetingState);
-  });
-
-  socket.on('set-greeting', (data) => {
-    if (typeof data !== 'object' || !data) return;
-    const token = data.token;
-    if (!isSocketAuthenticated(socket, token)) return;
-    greetingState = {
-      enabled: Boolean(data.enabled),
-      name: String(data.name || '').trim(),
-      titleEn: String(data.titleEn || 'Welcome').trim(),
-      titleEs: String(data.titleEs || '¡Bienvenido!').trim(),
-      subtitleEn: String(data.subtitleEn || '').trim(),
-      subtitleEs: String(data.subtitleEs || '').trim()
-    };
-    saveGreetingConfig();
-    io.emit('greeting-changed', greetingState);
   });
 
   socket.on('request-display-list', () => {
