@@ -1,0 +1,506 @@
+const socket = io();
+const tabControl = document.getElementById('tab-control');
+const tabContent = document.getElementById('tab-content');
+const panelControl = document.getElementById('panel-control');
+const panelContent = document.getElementById('panel-content');
+const btnEn = document.getElementById('btn-en');
+const btnEs = document.getElementById('btn-es');
+const currentLangEl = document.getElementById('current-lang');
+const listEl = document.getElementById('display-list');
+const contentTypeEl = document.getElementById('content-type');
+const contentScreenTypeEl = document.getElementById('content-screen-type');
+const contentProviderEl = document.getElementById('content-provider');
+const contentLinkEnEl = document.getElementById('content-link-en');
+const contentLinkEsEl = document.getElementById('content-link-es');
+const contentPngEnEl = document.getElementById('content-png-en');
+const contentPngEsEl = document.getElementById('content-png-es');
+const saveContentBtn = document.getElementById('save-content-btn');
+const contentMessageEl = document.getElementById('content-message');
+const contentListEl = document.getElementById('content-list');
+const linkFieldsEl = document.getElementById('link-fields');
+const pngFieldsEl = document.getElementById('png-fields');
+
+let currentLang = 'en';
+let screenTypes = [];
+let connectedDisplays = [];
+let customContents = [];
+
+// Authentication State & UI
+let adminToken = sessionStorage.getItem('adminToken') || '';
+const loginOverlay = document.getElementById('login-overlay');
+const loginForm = document.getElementById('login-form');
+const loginPassword = document.getElementById('login-password');
+const loginError = document.getElementById('login-error');
+const logoutBtn = document.getElementById('logout-btn');
+
+/**
+ * Constructs HTTP request headers incorporating the active admin session token.
+ * @returns {{ Authorization: string, 'Content-Type': string }} Authorization and content-type headers.
+ */
+function authHeaders() {
+  return {
+    'Authorization': `Bearer ${adminToken}`,
+    'Content-Type': 'application/json'
+  };
+}
+
+/**
+ * Displays the full-screen admin login overlay modal and focuses the password input.
+ * @returns {void}
+ */
+function showLoginOverlay() {
+  loginOverlay.style.display = 'flex';
+  logoutBtn.style.display = 'none';
+  loginPassword.value = '';
+  loginError.textContent = '';
+  setTimeout(() => loginPassword.focus(), 100);
+}
+
+/**
+ * Hides the admin login overlay modal and shows the logout button.
+ * @returns {void}
+ */
+function hideLoginOverlay() {
+  loginOverlay.style.display = 'none';
+  logoutBtn.style.display = 'inline-block';
+}
+
+/**
+ * Verifies current admin authentication token with backend endpoint `/api/auth-check`.
+ * Toggles login overlay depending on authentication status.
+ * @returns {Promise<boolean>} True if authenticated, false otherwise.
+ */
+async function checkAuth() {
+  if (!adminToken) {
+    showLoginOverlay();
+    return false;
+  }
+  try {
+    const res = await fetch('/api/auth-check', {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    const data = await res.json();
+    if (data.authenticated) {
+      hideLoginOverlay();
+      return true;
+    }
+  } catch (err) {
+    console.error('Auth check failed:', err);
+  }
+  showLoginOverlay();
+  return false;
+}
+
+/**
+ * Handles admin login form submission. Sends password to backend and stores returned auth token.
+ */
+loginForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const password = loginPassword.value;
+  loginError.textContent = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data = await res.json();
+    if (res.ok && data.token) {
+      adminToken = data.token;
+      sessionStorage.setItem('adminToken', adminToken);
+      hideLoginOverlay();
+      refreshAdminData().catch((err) => setContentMessage(err.message, true));
+    } else {
+      loginError.textContent = data.error || 'Invalid password';
+    }
+  } catch (err) {
+    loginError.textContent = 'Connection error. Please try again.';
+  }
+};
+
+/**
+ * Handles admin logout action. Invalidate backend session and clear stored session token.
+ */
+logoutBtn.onclick = async () => {
+  if (adminToken) {
+    try {
+      await fetch('/api/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${adminToken}` }
+      });
+    } catch (e) {}
+  }
+  adminToken = '';
+  sessionStorage.removeItem('adminToken');
+  showLoginOverlay();
+};
+
+/**
+ * Sanitizes strings to prevent XSS vulnerabilities when inserting dynamic content into HTML.
+ * @param {*} value - Input value to sanitize.
+ * @returns {string} HTML-escaped string.
+ */
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/**
+ * Updates UI state elements for active language selection ('en' or 'es').
+ * @param {'en'|'es'} lang - Selected language code.
+ * @returns {void}
+ */
+function setActive(lang) {
+  currentLang = lang;
+  btnEn.classList.toggle('active', lang === 'en');
+  btnEs.classList.toggle('active', lang === 'es');
+  currentLangEl.textContent = lang === 'en' ? 'English' : 'Español';
+}
+
+/**
+ * Switches active visible admin tab panel ('control' or 'content').
+ * @param {'control'|'content'} tabName - Target tab name.
+ * @returns {void}
+ */
+function showTab(tabName) {
+  tabControl.classList.toggle('active', tabName === 'control');
+  tabContent.classList.toggle('active', tabName === 'content');
+  panelControl.classList.toggle('active', tabName === 'control');
+  panelContent.classList.toggle('active', tabName === 'content');
+}
+
+/**
+ * Generates HTML `<option>` markup for screen type drop-down selectors.
+ * @param {string} selectedType - Currently selected screen type key.
+ * @returns {string} HTML string containing `<option>` elements.
+ */
+function getScreenTypeOptions(selectedType) {
+  return screenTypes
+    .map(type => {
+      const selected = type === selectedType ? ' selected' : '';
+      return `<option value="${type}"${selected}>${type}</option>`;
+    })
+    .join('');
+}
+
+/**
+ * Renders the custom content library entries into the content panel DOM element.
+ * @returns {void}
+ */
+function renderContentList() {
+  if (customContents.length === 0) {
+    contentListEl.innerHTML = '<span class="muted">No content yet.</span>';
+    return;
+  }
+
+  contentListEl.innerHTML = customContents
+    .map(content => {
+      const completeness = content.hasEnglish && content.hasSpanish ? 'ready' : 'missing language';
+      const provider = content.provider ? ` / ${escapeHtml(content.provider)}` : '';
+      return `
+        <div class="content-card">
+          <div><strong>${escapeHtml(content.screenType)}</strong> — ${escapeHtml(content.source)}${provider}</div>
+          <div class="muted">Status: ${escapeHtml(completeness)}</div>
+          <div class="content-actions">
+            <button class="danger delete-content-btn" data-screen-type="${escapeHtml(content.screenType)}">Delete</button>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/**
+ * Renders the list of active connected displays into the control panel DOM element.
+ * @returns {void}
+ */
+function renderDisplayList() {
+  if (connectedDisplays.length === 0) {
+    listEl.innerHTML = '<span id="empty">No displays configured yet</span>';
+    return;
+  }
+
+  listEl.innerHTML = connectedDisplays
+    .map(d => {
+      const isOnline = Boolean(d.connected);
+      const dotColor = isOnline ? '#0F6E56' : '#94a3b8';
+      const statusLabel = isOnline ? 'online' : 'offline';
+      return `
+        <div class="display-row" style="opacity: ${isOnline ? '1' : '0.65'};">
+          <span><span class="dot" style="background: ${dotColor};"></span>${escapeHtml(d.screenId)} <span class="muted">(${statusLabel})</span></span>
+          <select class="screen-type-select" data-screen-id="${escapeHtml(d.screenId)}" data-socket-id="${d.socketId || ''}">
+            ${getScreenTypeOptions(d.screenType)}
+          </select>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/**
+ * Displays status or error feedback message to the user in the admin content tab.
+ * @param {string} message - Message text to display.
+ * @param {boolean} isError - True if error message (red styling), false if success/info.
+ * @returns {void}
+ */
+function setContentMessage(message, isError) {
+  contentMessageEl.textContent = message;
+  contentMessageEl.style.color = isError ? '#a20000' : '#0F6E56';
+}
+
+/**
+ * Normalizes client-side input string into a slugified screen type key.
+ * @param {string} value - Raw screen type input string.
+ * @returns {string} Cleaned screen type slug key.
+ */
+function normalizeScreenType(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
+ * Asynchronously reads a local File object and converts it into a Base64 Data URL.
+ * @param {File} file - Local file object to read.
+ * @returns {Promise<string>} Data URL representation of file content.
+ */
+async function readFileAsDataUrl(file) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Unable to read file: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Fetches valid screen types from `/screen-types` endpoint and populates `screenTypes` state array.
+ * @returns {Promise<void>}
+ */
+async function loadScreenTypes() {
+  const response = await fetch('/screen-types');
+  if (!response.ok) {
+    throw new Error(`Failed to load screen types: ${response.status}`);
+  }
+
+  const text = await response.text();
+  screenTypes = text
+    .split(',')
+    .map(type => type.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Fetches custom content library entries from `/custom-contents` endpoint and re-renders content list.
+ * @returns {Promise<void>}
+ */
+async function loadCustomContents() {
+  const response = await fetch('/custom-contents');
+  if (!response.ok) {
+    throw new Error(`Failed to load content library: ${response.status}`);
+  }
+  customContents = await response.json();
+  renderContentList();
+}
+
+/**
+ * Synchronizes all admin panel data by reloading screen types, custom content library, and display states.
+ * @returns {Promise<void>}
+ */
+async function refreshAdminData() {
+  await Promise.all([loadScreenTypes(), loadCustomContents()]);
+  renderDisplayList();
+  socket.emit('request-display-list');
+}
+
+/**
+ * Toggles visibility of link input fields vs. PNG file upload fields based on content type drop-down.
+ * @returns {void}
+ */
+function updateContentFields() {
+  const isLink = contentTypeEl.value === 'link';
+  linkFieldsEl.style.display = isLink ? '' : 'none';
+  pngFieldsEl.style.display = isLink ? 'none' : '';
+}
+
+/**
+ * Sends HTTP POST request to `/custom-contents/link` to create/update external URL link content.
+ * @param {string} screenType - Screen type key to attach content link to.
+ * @returns {Promise<void>}
+ */
+async function saveLinkContent(screenType) {
+  const payload = {
+    screenType,
+    provider: contentProviderEl.value,
+    urlEn: contentLinkEnEl.value.trim(),
+    urlEs: contentLinkEsEl.value.trim()
+  };
+  const response = await fetch('/custom-contents/link', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error || 'Unable to save link content');
+  }
+}
+
+/**
+ * Reads English and Spanish PNG files as Data URLs and uploads them via `/custom-contents/png`.
+ * @param {string} screenType - Screen type key to attach PNG images to.
+ * @returns {Promise<void>}
+ */
+async function savePngContent(screenType) {
+  const files = [
+    { lang: 'en', file: contentPngEnEl.files[0] },
+    { lang: 'es', file: contentPngEsEl.files[0] }
+  ];
+  for (const item of files) {
+    if (!item.file) {
+      throw new Error(`Missing ${item.lang.toUpperCase()} PNG file`);
+    }
+    const dataUrl = await readFileAsDataUrl(item.file);
+    const response = await fetch('/custom-contents/png', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        screenType,
+        language: item.lang,
+        dataUrl
+      })
+    });
+    if (!response.ok) {
+      const body = await response.json();
+      throw new Error(body.error || `Unable to upload ${item.lang.toUpperCase()} PNG`);
+    }
+  }
+}
+
+/**
+ * Validates form inputs and saves content (either external link or PNG asset files) to the backend.
+ * @returns {Promise<void>}
+ */
+async function saveContent() {
+  const screenType = normalizeScreenType(contentScreenTypeEl.value);
+  if (!screenType) {
+    throw new Error('Content key is required');
+  }
+  if (contentTypeEl.value === 'link') {
+    await saveLinkContent(screenType);
+  } else {
+    await savePngContent(screenType);
+  }
+}
+
+/**
+ * Sends HTTP DELETE request to `/custom-contents/:screenType` to remove a content library entry.
+ * @param {string} screenType - Screen type key to delete.
+ * @returns {Promise<void>}
+ */
+async function deleteContent(screenType) {
+  const response = await fetch(`/custom-contents/${encodeURIComponent(screenType)}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${adminToken}` }
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error || 'Unable to delete content');
+  }
+}
+
+btnEn.onclick = () => socket.emit('set-language', { lang: 'en', token: adminToken });
+btnEs.onclick = () => socket.emit('set-language', { lang: 'es', token: adminToken });
+tabControl.onclick = () => showTab('control');
+tabContent.onclick = () => showTab('content');
+contentTypeEl.onchange = updateContentFields;
+
+saveContentBtn.onclick = async () => {
+  saveContentBtn.disabled = true;
+  setContentMessage('Saving content…', false);
+  try {
+    await saveContent();
+    await refreshAdminData();
+    setContentMessage('Content saved successfully.', false);
+  } catch (error) {
+    setContentMessage(error.message, true);
+  } finally {
+    saveContentBtn.disabled = false;
+  }
+};
+
+/**
+ * Socket Event: connect
+ * Requests current language state and connected display list on connection.
+ */
+socket.on('connect', () => {
+  socket.emit('request-state');
+  socket.emit('request-display-list');
+});
+
+socket.on('language-changed', setActive);
+socket.on('content-library-changed', () => {
+  refreshAdminData().catch((error) => setContentMessage(error.message, true));
+});
+
+/**
+ * Event Listener: Display Screen Type Select Dropdown Change
+ * Emits `set-display-screen-type` to server when admin changes a display's assigned screen type.
+ */
+listEl.addEventListener('change', (event) => {
+  const select = event.target.closest('.screen-type-select');
+  if (!select) return;
+
+  socket.emit('set-display-screen-type', {
+    screenId: select.dataset.screenId,
+    socketId: select.dataset.socketId,
+    screenType: select.value,
+    token: adminToken
+  });
+});
+
+/**
+ * Socket Event: display-list
+ * Updates connected displays state array and re-renders display list UI.
+ */
+socket.on('display-list', (displays) => {
+  connectedDisplays = displays;
+  renderDisplayList();
+});
+
+/**
+ * Event Listener: Delete Content Library Button Click
+ * Handles deletion of custom content items from the library list view.
+ */
+contentListEl.addEventListener('click', async (event) => {
+  const button = event.target.closest('.delete-content-btn');
+  if (!button) return;
+
+  const screenType = button.dataset.screenType;
+  if (!screenType) return;
+
+  button.disabled = true;
+  setContentMessage(`Deleting ${screenType}…`, false);
+  try {
+    await deleteContent(screenType);
+    await refreshAdminData();
+    setContentMessage(`Deleted ${screenType}.`, false);
+  } catch (error) {
+    setContentMessage(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+checkAuth().then((authenticated) => {
+  if (authenticated) {
+    refreshAdminData().catch((error) => setContentMessage(error.message, true));
+  }
+});

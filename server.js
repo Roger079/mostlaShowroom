@@ -20,10 +20,20 @@ app.use(express.json({ limit: '15mb' }));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const activeSessions = new Set();
 
+/**
+ * Generates a cryptographically secure session token for admin authentication.
+ * @returns {string} A 64-character hexadecimal session token.
+ */
 function generateSessionToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
+/**
+ * Extracts the session token from an HTTP request.
+ * Checks Bearer Authorization header, 'x-admin-token' header, or 'token' query param.
+ * @param {import('express').Request} req - Express request object.
+ * @returns {string|null} Extracted token if present, otherwise null.
+ */
 function extractToken(req) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -38,10 +48,23 @@ function extractToken(req) {
   return null;
 }
 
+/**
+ * Checks whether a given session token is valid and active.
+ * @param {string|null} token - Token string to validate.
+ * @returns {boolean} True if token exists in active sessions, false otherwise.
+ */
 function isValidToken(token) {
   return Boolean(token && activeSessions.has(token));
 }
 
+/**
+ * Express middleware requiring a valid admin authorization token.
+ * Responds with 401 Unauthorized if the token is missing or invalid.
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express next middleware callback.
+ * @returns {void|import('express').Response}
+ */
 function requireAdminAuth(req, res, next) {
   const token = extractToken(req);
   if (!isValidToken(token)) {
@@ -50,6 +73,12 @@ function requireAdminAuth(req, res, next) {
   next();
 }
 
+/**
+ * Checks if a Socket.IO connection or payload is authenticated with a valid admin token.
+ * @param {import('socket.io').Socket} socket - Socket.IO socket instance.
+ * @param {string|null} [payloadToken] - Optional token passed in event payload.
+ * @returns {boolean} True if socket connection or payload contains a valid admin token.
+ */
 function isSocketAuthenticated(socket, payloadToken) {
   const token = socket.handshake.auth?.token || payloadToken;
   return isValidToken(token);
@@ -61,12 +90,17 @@ function isSocketAuthenticated(socket, payloadToken) {
 // this value immediately instead of waiting for the next toggle.
 let currentLanguage = 'en';
 const customContentPath = path.join(__dirname, 'data', 'custom-content.json');
+const screensPath = path.join(__dirname, 'data', 'screens.json');
 const customLinks = new Map();
 
-// Track connected displays so the admin panel can show who's online.
-// Map of socket.id -> { screenId, screenType, connectedAt }
+// Track pre-registered displays from screens.json so the admin panel shows online/offline status.
+// Map of screenId -> { screenId, screenType, connected, socketId, connectedAt }
 const displays = new Map();
 
+/**
+ * Ensures that the data storage directory (`data/`) exists.
+ * @returns {void}
+ */
 function ensureDataDirectory() {
   const dir = path.dirname(customContentPath);
   if (!fs.existsSync(dir)) {
@@ -74,6 +108,12 @@ function ensureDataDirectory() {
   }
 }
 
+/**
+ * Normalizes a raw screen type identifier into a valid slugified key.
+ * Removes invalid characters, converts to lowercase, and trims leading/trailing dashes.
+ * @param {string} value - Raw screen type identifier.
+ * @returns {string} Normalized screen type key.
+ */
 function normalizeScreenType(value) {
   const normalized = String(value || '')
     .trim()
@@ -84,12 +124,25 @@ function normalizeScreenType(value) {
   return normalized;
 }
 
+/**
+ * Parses a content name to extract its base prefix and language code suffix.
+ * Example: "promo-en" -> { prefix: "promo", lang: "en" }.
+ * @param {string} contentName - File base name or content key.
+ * @returns {{ prefix: string, lang: string }|null} Object containing prefix and lang, or null if no match.
+ */
 function parseContentLanguage(contentName) {
   const match = contentName.match(/^(.*)-([a-z]{2}(?:-[a-z]{2})?)$/i);
   if (!match) return null;
   return { prefix: match[1], lang: match[2].toLowerCase() };
 }
 
+/**
+ * Helper to add a language code to the Set of languages associated with a screen type key.
+ * @param {Map<string, Set<string>>} map - Target map mapping screen types to language Sets.
+ * @param {string} key - Screen type key.
+ * @param {string} language - Language code (e.g., 'en', 'es').
+ * @returns {void}
+ */
 function addLanguageEntry(map, key, language) {
   if (!map.has(key)) {
     map.set(key, new Set());
@@ -97,6 +150,11 @@ function addLanguageEntry(map, key, language) {
   map.get(key).add(language);
 }
 
+/**
+ * Loads custom content links from disk (`data/custom-content.json`) into the `customLinks` Map.
+ * Creates an empty file if it does not exist.
+ * @returns {void}
+ */
 function loadCustomLinks() {
   ensureDataDirectory();
   if (!fs.existsSync(customContentPath)) {
@@ -122,6 +180,48 @@ function loadCustomLinks() {
   }
 }
 
+/**
+ * Loads pre-defined screen roster from `data/screens.json` into `displays` Map.
+ * Initializes all screens as offline (`connected: false`).
+ * @returns {void}
+ */
+function loadScreens() {
+  ensureDataDirectory();
+  if (!fs.existsSync(screensPath)) {
+    const defaultData = {
+      screens: [
+        { name: 'screen1', defaultScreenType: 'telepresencia' }
+      ]
+    };
+    fs.writeFileSync(screensPath, JSON.stringify(defaultData, null, 2), 'utf8');
+  }
+
+  try {
+    const fileContents = fs.readFileSync(screensPath, 'utf8');
+    const parsed = JSON.parse(fileContents);
+    const screensList = Array.isArray(parsed.screens) ? parsed.screens : [];
+    displays.clear();
+    for (const screen of screensList) {
+      const screenId = String(screen.name || '').trim();
+      if (!screenId) continue;
+      const screenType = getDefaultScreenType(screen.defaultScreenType || screenId);
+      displays.set(screenId, {
+        screenId,
+        screenType,
+        connected: false,
+        socketId: null,
+        connectedAt: null
+      });
+    }
+  } catch (err) {
+    console.error('Error loading screens.json:', err);
+  }
+}
+
+/**
+ * Saves current custom link configurations from `customLinks` Map to `data/custom-content.json`.
+ * @returns {void}
+ */
 function saveCustomLinks() {
   ensureDataDirectory();
   const payload = {
@@ -134,6 +234,10 @@ function saveCustomLinks() {
   fs.writeFileSync(customContentPath, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+/**
+ * Scans the `public/assets` directory for static image assets and maps screen types to available languages.
+ * @returns {Map<string, Set<string>>} Map of screen type keys to Sets of language codes.
+ */
 function getAssetsByScreenType() {
   const assetsDir = path.join(__dirname, 'public', 'assets');
   const result = new Map();
@@ -152,6 +256,11 @@ function getAssetsByScreenType() {
   return result;
 }
 
+/**
+ * Aggregates all valid screen types from static assets and custom link configurations.
+ * Only returns screen types that have complete bilingual coverage (both 'en' and 'es').
+ * @returns {string[]} Alphabetically sorted array of valid screen type keys.
+ */
 function getScreenTypes() {
   const assetMap = getAssetsByScreenType();
   const allTypes = new Map(assetMap);
@@ -171,9 +280,13 @@ function getScreenTypes() {
   }
   return screenTypes.sort();
 }
-  
 
-
+/**
+ * Resolves the default screen type for a connected display given a requested screen ID/type.
+ * Fallbacks to the requested ID if matching, or the first available screen type.
+ * @param {string} screenId - Screen ID or screen type requested by the client.
+ * @returns {string} Resolved valid screen type.
+ */
 function getDefaultScreenType(screenId) {
   const screenTypes = getScreenTypes();
   const normalizedScreenId = normalizeScreenType(screenId);
@@ -183,16 +296,26 @@ function getDefaultScreenType(screenId) {
   return screenTypes[0] || normalizedScreenId;
 }
 
+/**
+ * Broadcasts the current list of rostered displays and connection statuses to all Socket.IO clients.
+ * @returns {void}
+ */
 function broadcastDisplayList() {
   const list = Array.from(displays.values()).map(d => ({
     socketId: d.socketId,
     screenId: d.screenId,
     screenType: d.screenType,
+    connected: Boolean(d.connected),
     connectedAt: d.connectedAt
   }));
   io.emit('display-list', list);
 }
 
+/**
+ * Finds asset filenames for a specific screen type in `public/assets`.
+ * @param {string} screenType - Screen type key.
+ * @returns {Object<string, string>} Object mapping language code to filename (e.g. { en: 'screen1-en.png', es: 'screen1-es.png' }).
+ */
 function getAssetFiles(screenType) {
   const assetsDir = path.join(__dirname, 'public', 'assets');
   const files = {};
@@ -212,6 +335,12 @@ function getAssetFiles(screenType) {
   return files;
 }
 
+/**
+ * Generates the content configuration object for a given screen type.
+ * Returns custom link details if configured, or static image asset mappings.
+ * @param {string} screenType - Screen type key.
+ * @returns {Object} Content configuration object specifying type ('link' or 'asset') and associated URLs or asset filenames.
+ */
 function getContentConfig(screenType) {
   const linkConfig = customLinks.get(screenType);
   if (linkConfig) {
@@ -227,7 +356,12 @@ function getContentConfig(screenType) {
   };
 }
 
-// Auth Endpoints
+// ---- Auth Endpoints ----
+
+/**
+ * POST /api/login
+ * Admin authentication endpoint. Validates password and generates session token.
+ */
 app.post('/api/login', (req, res) => {
   const { password } = req.body || {};
   if (password === ADMIN_PASSWORD) {
@@ -238,6 +372,10 @@ app.post('/api/login', (req, res) => {
   return res.status(401).json({ error: 'Invalid admin password' });
 });
 
+/**
+ * POST /api/logout
+ * Admin logout endpoint. Revokes and removes the session token.
+ */
 app.post('/api/logout', (req, res) => {
   const token = extractToken(req);
   if (token) {
@@ -246,15 +384,29 @@ app.post('/api/logout', (req, res) => {
   return res.json({ ok: true });
 });
 
+/**
+ * GET /api/auth-check
+ * Session check endpoint. Verifies if current session token is valid.
+ */
 app.get('/api/auth-check', (req, res) => {
   const token = extractToken(req);
   return res.json({ authenticated: isValidToken(token) });
 });
 
+// ---- Content & Display API Endpoints ----
+
+/**
+ * GET /screen-types
+ * Returns a plain text comma-separated list of all valid screen types.
+ */
 app.get('/screen-types', (_req, res) => {
   res.type('text/plain').send(getScreenTypes().join(','));
 });
 
+/**
+ * GET /custom-contents
+ * Returns JSON array of all available content library entries (assets & custom links).
+ */
 app.get('/custom-contents', (_req, res) => {
   const assets = getAssetsByScreenType();
   const rows = [];
@@ -282,6 +434,10 @@ app.get('/custom-contents', (_req, res) => {
   res.json(rows);
 });
 
+/**
+ * POST /custom-contents/link
+ * Admin endpoint to add or update an external link content entry.
+ */
 app.post('/custom-contents/link', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.body?.screenType);
   const provider = String(req.body?.provider || 'link').trim().toLowerCase();
@@ -307,6 +463,10 @@ app.post('/custom-contents/link', requireAdminAuth, (req, res) => {
   return res.status(201).json({ ok: true, screenType });
 });
 
+/**
+ * POST /custom-contents/png
+ * Admin endpoint to upload a PNG image asset as Base64 payload.
+ */
 app.post('/custom-contents/png', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.body?.screenType);
   const language = String(req.body?.language || '').trim().toLowerCase();
@@ -335,6 +495,10 @@ app.post('/custom-contents/png', requireAdminAuth, (req, res) => {
   return res.status(201).json({ ok: true, file: outputName });
 });
 
+/**
+ * DELETE /custom-contents/:screenType
+ * Admin endpoint to delete a content entry (custom link or image asset files).
+ */
 app.delete('/custom-contents/:screenType', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.params.screenType);
   if (!screenType) {
@@ -371,43 +535,68 @@ app.delete('/custom-contents/:screenType', requireAdminAuth, (req, res) => {
 });
 
 loadCustomLinks();
+loadScreens();
 
+/**
+ * Socket.IO Real-Time Connection Manager
+ * Listens for client connections (displays and admin panels) and handles events.
+ */
 io.on('connection', (socket) => {
-  // A client tells us what kind of client it is right after connecting.
+  /**
+   * Event: register-display
+   * Sent by display instances to announce presence and receive configuration.
+   * Only allows connections from screens defined in screens.json.
+   */
   socket.on('register-display', (payload) => {
     const displayId = typeof payload === 'object' && payload
       ? payload.displayId || payload.screenId || payload.screenType
       : payload;
+    
+    const screenKey = String(displayId || '').trim();
+    const display = displays.get(screenKey);
+
+    if (!display) {
+      console.warn(`[Socket] Connection rejected for unregistered display: "${displayId}"`);
+      socket.emit('error', { message: `Display "${displayId}" is not registered in screens.json` });
+      return;
+    }
+
     const requestedScreenType = typeof payload === 'object' && payload
       ? payload.screenType
       : null;
-    const screenType = getDefaultScreenType(requestedScreenType || displayId);
-    displays.set(socket.id, {
-      socketId: socket.id,
-      screenId: String(displayId || socket.id),
-      screenType,
-      connectedAt: Date.now()
-    });
+    const screenType = getDefaultScreenType(requestedScreenType || display.screenType);
+
+    display.connected = true;
+    display.socketId = socket.id;
+    display.connectedAt = Date.now();
+    display.screenType = screenType;
+
+    displays.set(screenKey, display);
+
     socket.emit('display-config', { screenType, language: currentLanguage, content: getContentConfig(screenType) });
     broadcastDisplayList();
   });
 
-  // Any client (display or admin) can ask for current state on load/reconnect.
+  /**
+   * Event: request-state
+   * Sent by clients requesting current global language state.
+   */
   socket.on('request-state', () => {
     socket.emit('language-changed', currentLanguage);
   });
 
+  /**
+   * Event: request-display-list
+   * Sent by admin panel to fetch current display list.
+   */
   socket.on('request-display-list', () => {
-    const list = Array.from(displays.values()).map(d => ({
-      socketId: d.socketId,
-      screenId: d.screenId,
-      screenType: d.screenType,
-      connectedAt: d.connectedAt
-    }));
-    socket.emit('display-list', list);
+    broadcastDisplayList();
   });
 
-  // Admin panel emits this when someone clicks English / Español.
+  /**
+   * Event: set-language
+   * Emitted by admin panel to change global display language ('en' or 'es').
+   */
   socket.on('set-language', (payload) => {
     const lang = typeof payload === 'object' && payload ? payload.lang : payload;
     const token = typeof payload === 'object' && payload ? payload.token : null;
@@ -417,26 +606,48 @@ io.on('connection', (socket) => {
     io.emit('language-changed', currentLanguage);
   });
 
+  /**
+   * Event: set-display-screen-type
+   * Emitted by admin panel to reassign screen type to a display.
+   */
   socket.on('set-display-screen-type', (payload) => {
     if (typeof payload !== 'object' || !payload) return;
-    const { socketId, screenType, token } = payload;
+    const { socketId, screenId, screenType, token } = payload;
     if (!isSocketAuthenticated(socket, token)) return;
-    const display = displays.get(socketId);
-    if (!display) return;
+
+    let targetDisplay = null;
+    if (screenId && displays.has(screenId)) {
+      targetDisplay = displays.get(screenId);
+    } else if (socketId) {
+      targetDisplay = Array.from(displays.values()).find(d => d.socketId === socketId);
+    }
+    if (!targetDisplay) return;
 
     const validScreenTypes = getScreenTypes();
     if (!validScreenTypes.includes(screenType)) return;
 
-    display.screenType = screenType;
-    displays.set(socketId, display);
-    io.to(socketId).emit('screen-type-changed', { screenType, content: getContentConfig(screenType) });
+    targetDisplay.screenType = screenType;
+    displays.set(targetDisplay.screenId, targetDisplay);
+
+    if (targetDisplay.socketId) {
+      io.to(targetDisplay.socketId).emit('screen-type-changed', { screenType, content: getContentConfig(screenType) });
+    }
     broadcastDisplayList();
   });
 
+  /**
+   * Event: disconnect
+   * Updates screen connection status to offline when a display disconnects.
+   */
   socket.on('disconnect', () => {
-    if (displays.has(socket.id)) {
-      displays.delete(socket.id);
-      broadcastDisplayList();
+    for (const [screenId, display] of displays.entries()) {
+      if (display.socketId === socket.id) {
+        display.connected = false;
+        display.socketId = null;
+        displays.set(screenId, display);
+        broadcastDisplayList();
+        break;
+      }
     }
   });
 });
