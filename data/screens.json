@@ -1,0 +1,8 @@
+{
+  "screens": [
+    {
+      "name": "biblioia",
+      "defaultScreenType": "libai"
+    }
+  ]
+}

@@ -124,6 +124,19 @@ function normalizeScreenType(value) {
   return normalized;
 }
 
+
+
+function saveScreens() {
+  ensureDataDirectory();
+  const payload = {
+    screens: Array.from(displays.values()).map(d => ({
+      name: d.screenId,
+      defaultScreenType: d.screenType
+    }))
+  };
+  fs.writeFileSync(screensPath, JSON.stringify(payload, null, 2), 'utf8');
+}
+
 /**
  * Parses a content name to extract its base prefix and language code suffix.
  * Example: "promo-en" -> { prefix: "promo", lang: "en" }.
@@ -157,26 +170,36 @@ function addLanguageEntry(map, key, language) {
  */
 function loadCustomLinks() {
   ensureDataDirectory();
+  const defaultData = { links: [] };
   if (!fs.existsSync(customContentPath)) {
-    fs.writeFileSync(customContentPath, JSON.stringify({ links: [] }, null, 2), 'utf8');
+    fs.writeFileSync(customContentPath, JSON.stringify(defaultData, null, 2), 'utf8');
     return;
   }
 
-  const fileContents = fs.readFileSync(customContentPath, 'utf8');
-  const parsed = JSON.parse(fileContents);
-  const links = Array.isArray(parsed.links) ? parsed.links : [];
-  customLinks.clear();
-  for (const link of links) {
-    const screenType = normalizeScreenType(link.screenType);
-    if (!screenType) continue;
-    if (!link.urls || typeof link.urls.en !== 'string' || typeof link.urls.es !== 'string') continue;
-    customLinks.set(screenType, {
-      provider: link.provider || 'link',
-      urls: {
-        en: link.urls.en.trim(),
-        es: link.urls.es.trim()
-      }
-    });
+  try {
+    const fileContents = fs.readFileSync(customContentPath, 'utf8');
+    if (!fileContents.trim()) {
+      throw new SyntaxError('File is empty');
+    }
+    const parsed = JSON.parse(fileContents);
+    const links = Array.isArray(parsed?.links) ? parsed.links : [];
+    customLinks.clear();
+    for (const link of links) {
+      const screenType = normalizeScreenType(link.screenType);
+      if (!screenType) continue;
+      if (!link.urls || typeof link.urls.en !== 'string' || typeof link.urls.es !== 'string') continue;
+      customLinks.set(screenType, {
+        provider: link.provider || 'link',
+        urls: {
+          en: link.urls.en.trim(),
+          es: link.urls.es.trim()
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Error loading custom-content.json, re-initializing default data:', err.message);
+    fs.writeFileSync(customContentPath, JSON.stringify(defaultData, null, 2), 'utf8');
+    customLinks.clear();
   }
 }
 
@@ -187,19 +210,23 @@ function loadCustomLinks() {
  */
 function loadScreens() {
   ensureDataDirectory();
+  const defaultData = {
+    screens: [
+      { name: 'screen1', defaultScreenType: 'telepresencia' }
+    ]
+  };
+
   if (!fs.existsSync(screensPath)) {
-    const defaultData = {
-      screens: [
-        { name: 'screen1', defaultScreenType: 'telepresencia' }
-      ]
-    };
     fs.writeFileSync(screensPath, JSON.stringify(defaultData, null, 2), 'utf8');
   }
 
   try {
     const fileContents = fs.readFileSync(screensPath, 'utf8');
+    if (!fileContents.trim()) {
+      throw new SyntaxError('File is empty');
+    }
     const parsed = JSON.parse(fileContents);
-    const screensList = Array.isArray(parsed.screens) ? parsed.screens : [];
+    const screensList = Array.isArray(parsed?.screens) ? parsed.screens : [];
     displays.clear();
     for (const screen of screensList) {
       const screenId = String(screen.name || '').trim();
@@ -214,7 +241,16 @@ function loadScreens() {
       });
     }
   } catch (err) {
-    console.error('Error loading screens.json:', err);
+    console.error('Error loading screens.json, re-initializing default data:', err.message);
+    fs.writeFileSync(screensPath, JSON.stringify(defaultData, null, 2), 'utf8');
+    displays.clear();
+    displays.set('screen1', {
+      screenId: 'screen1',
+      screenType: getDefaultScreenType('telepresencia'),
+      connected: false,
+      socketId: null,
+      connectedAt: null
+    });
   }
 }
 
@@ -393,6 +429,70 @@ app.get('/api/auth-check', (req, res) => {
   return res.json({ authenticated: isValidToken(token) });
 });
 
+/**
+ * GET /api/screens
+ * Returns JSON array of all rostered displays.
+ */
+app.get('/api/screens', (_req, res) => {
+  return res.json(Array.from(displays.values()));
+});
+
+/**
+ * POST /api/screens
+ * Admin endpoint to add a new display screen or update an existing screen's default screen type.
+ */
+app.post('/api/screens', requireAdminAuth, (req, res) => {
+  const rawId = String(req.body?.screenId || '').trim();
+  const screenKey = normalizeScreenType(rawId);
+  const defaultScreenType = normalizeScreenType(req.body?.defaultScreenType);
+
+  if (!screenKey) {
+    return res.status(400).json({ error: 'Valid screenId is required' });
+  }
+  if (!defaultScreenType) {
+    return res.status(400).json({ error: 'defaultScreenType is required' });
+  }
+  if (!getScreenTypes().includes(defaultScreenType)) {
+    return res.status(400).json({ error: `Invalid screen type: "${defaultScreenType}"` });
+  }
+
+  const existing = displays.get(screenKey);
+  if (existing) {
+    existing.screenType = defaultScreenType;
+  } else {
+    displays.set(screenKey, {
+      screenId: screenKey,
+      screenType: defaultScreenType,
+      connected: false,
+      socketId: null,
+      connectedAt: null
+    });
+  }
+
+  saveScreens();
+  broadcastDisplayList();
+  return res.status(existing ? 200 : 201).json({ ok: true, screenId: screenKey, updated: Boolean(existing) });
+});
+
+/**
+ * DELETE /api/screens/:screenId
+ * Admin endpoint to delete a display screen from the roster.
+ */
+app.delete('/api/screens/:screenId', requireAdminAuth, (req, res) => {
+  const screenKey = normalizeScreenType(req.params.screenId);
+  if (!screenKey) {
+    return res.status(400).json({ error: 'Valid screenId is required' });
+  }
+  if (!displays.has(screenKey)) {
+    return res.status(404).json({ error: 'Screen not found in roster' });
+  }
+
+  displays.delete(screenKey);
+  saveScreens();
+  broadcastDisplayList();
+  return res.json({ ok: true, screenId: screenKey });
+});
+
 // ---- Content & Display API Endpoints ----
 
 /**
@@ -551,7 +651,7 @@ io.on('connection', (socket) => {
     const displayId = typeof payload === 'object' && payload
       ? payload.displayId || payload.screenId || payload.screenType
       : payload;
-    
+
     const screenKey = String(displayId || '').trim();
     const display = displays.get(screenKey);
 
@@ -628,6 +728,7 @@ io.on('connection', (socket) => {
 
     targetDisplay.screenType = screenType;
     displays.set(targetDisplay.screenId, targetDisplay);
+    saveScreens();
 
     if (targetDisplay.socketId) {
       io.to(targetDisplay.socketId).emit('screen-type-changed', { screenType, content: getContentConfig(screenType) });

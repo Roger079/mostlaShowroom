@@ -1,8 +1,11 @@
 const socket = io();
 const tabControl = document.getElementById('tab-control');
 const tabContent = document.getElementById('tab-content');
+const tabScreens = document.getElementById('tab-screens');
+
 const panelControl = document.getElementById('panel-control');
 const panelContent = document.getElementById('panel-content');
+const panelScreens = document.getElementById('panel-screens');
 const btnEn = document.getElementById('btn-en');
 const btnEs = document.getElementById('btn-es');
 const currentLangEl = document.getElementById('current-lang');
@@ -19,6 +22,12 @@ const contentMessageEl = document.getElementById('content-message');
 const contentListEl = document.getElementById('content-list');
 const linkFieldsEl = document.getElementById('link-fields');
 const pngFieldsEl = document.getElementById('png-fields');
+
+const screenIdInputEl = document.getElementById('screen-id-input');
+const screenDefaultTypeEl = document.getElementById('screen-default-type');
+const saveScreenBtn = document.getElementById('save-screen-btn');
+const screenMessageEl = document.getElementById('screen-message');
+const screenListEl = document.getElementById('screen-list');
 
 let currentLang = 'en';
 let screenTypes = [];
@@ -128,7 +137,7 @@ logoutBtn.onclick = async () => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${adminToken}` }
       });
-    } catch (e) {}
+    } catch (e) { }
   }
   adminToken = '';
   sessionStorage.removeItem('adminToken');
@@ -169,8 +178,10 @@ function setActive(lang) {
 function showTab(tabName) {
   tabControl.classList.toggle('active', tabName === 'control');
   tabContent.classList.toggle('active', tabName === 'content');
+  if (tabScreens) tabScreens.classList.toggle('active', tabName === 'screens');
   panelControl.classList.toggle('active', tabName === 'control');
   panelContent.classList.toggle('active', tabName === 'content');
+  if (panelScreens) panelScreens.classList.toggle('active', tabName === 'screens');
 }
 
 /**
@@ -295,6 +306,10 @@ async function loadScreenTypes() {
     .split(',')
     .map(type => type.trim())
     .filter(Boolean);
+
+  if (screenDefaultTypeEl) {
+    screenDefaultTypeEl.innerHTML = getScreenTypeOptions();
+  }
 }
 
 /**
@@ -317,7 +332,80 @@ async function loadCustomContents() {
 async function refreshAdminData() {
   await Promise.all([loadScreenTypes(), loadCustomContents()]);
   renderDisplayList();
+  renderScreenRoster();
   socket.emit('request-display-list');
+}
+
+/**
+ * Renders configured screen roster into the screens panel DOM element.
+ */
+function renderScreenRoster() {
+  if (!screenListEl) return;
+  if (connectedDisplays.length === 0) {
+    screenListEl.innerHTML = '<span class="muted">No rostered screens configured.</span>';
+    return;
+  }
+
+  screenListEl.innerHTML = connectedDisplays
+    .map(d => {
+      const isOnline = Boolean(d.connected);
+      const dotColor = isOnline ? '#0F6E56' : '#94a3b8';
+      const statusLabel = isOnline ? 'online' : 'offline';
+      return `
+        <div class="content-card" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div>
+            <span class="dot" style="background: ${dotColor};"></span>
+            <strong>${escapeHtml(d.screenId)}</strong>
+            <span class="muted">(${statusLabel})</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label class="muted" style="font-size: 13px;">Default:</label>
+            <select class="roster-type-select" data-screen-id="${escapeHtml(d.screenId)}">
+              ${getScreenTypeOptions(d.screenType)}
+            </select>
+            <button class="danger delete-screen-btn" data-screen-id="${escapeHtml(d.screenId)}">Delete</button>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+function setScreenMessage(message, isError) {
+  if (!screenMessageEl) return;
+  screenMessageEl.textContent = message;
+  screenMessageEl.style.color = isError ? '#a20000' : '#0F6E56';
+}
+
+async function saveScreen(screenIdParam, defaultScreenTypeParam) {
+  const screenId = normalizeScreenType(screenIdParam || (screenIdInputEl ? screenIdInputEl.value : ''));
+  const defaultScreenType = defaultScreenTypeParam || (screenDefaultTypeEl ? screenDefaultTypeEl.value : '');
+  if (!screenId) {
+    throw new Error('Screen ID is required');
+  }
+  if (!defaultScreenType) {
+    throw new Error('Default screen type is required');
+  }
+  const response = await fetch('/api/screens', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ screenId, defaultScreenType })
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error || 'Unable to save screen');
+  }
+}
+
+async function deleteScreen(screenId) {
+  const response = await fetch(`/api/screens/${encodeURIComponent(screenId)}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${adminToken}` }
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error || 'Unable to delete screen');
+  }
 }
 
 /**
@@ -420,6 +508,7 @@ btnEn.onclick = () => socket.emit('set-language', { lang: 'en', token: adminToke
 btnEs.onclick = () => socket.emit('set-language', { lang: 'es', token: adminToken });
 tabControl.onclick = () => showTab('control');
 tabContent.onclick = () => showTab('content');
+if (tabScreens) tabScreens.onclick = () => showTab('screens');
 contentTypeEl.onchange = updateContentFields;
 
 saveContentBtn.onclick = async () => {
@@ -435,6 +524,23 @@ saveContentBtn.onclick = async () => {
     saveContentBtn.disabled = false;
   }
 };
+
+if (saveScreenBtn) {
+  saveScreenBtn.onclick = async () => {
+    saveScreenBtn.disabled = true;
+    setScreenMessage('Saving screen…', false);
+    try {
+      await saveScreen();
+      await refreshAdminData();
+      if (screenIdInputEl) screenIdInputEl.value = '';
+      setScreenMessage('Screen saved successfully.', false);
+    } catch (error) {
+      setScreenMessage(error.message, true);
+    } finally {
+      saveScreenBtn.disabled = false;
+    }
+  };
+}
 
 /**
  * Socket Event: connect
@@ -473,6 +579,7 @@ listEl.addEventListener('change', (event) => {
 socket.on('display-list', (displays) => {
   connectedDisplays = displays;
   renderDisplayList();
+  renderScreenRoster();
 });
 
 /**
@@ -498,6 +605,47 @@ contentListEl.addEventListener('click', async (event) => {
     button.disabled = false;
   }
 });
+
+if (screenListEl) {
+  screenListEl.addEventListener('click', async (event) => {
+    const button = event.target.closest('.delete-screen-btn');
+    if (!button) return;
+
+    const screenId = button.dataset.screenId;
+    if (!screenId) return;
+
+    button.disabled = true;
+    setScreenMessage(`Deleting ${screenId}…`, false);
+    try {
+      await deleteScreen(screenId);
+      await refreshAdminData();
+      setScreenMessage(`Deleted ${screenId}.`, false);
+    } catch (error) {
+      setScreenMessage(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  screenListEl.addEventListener('change', async (event) => {
+    const select = event.target.closest('.roster-type-select');
+    if (!select) return;
+
+    const screenId = select.dataset.screenId;
+    const defaultScreenType = select.value;
+    select.disabled = true;
+    setScreenMessage(`Updating default content for ${screenId}…`, false);
+    try {
+      await saveScreen(screenId, defaultScreenType);
+      await refreshAdminData();
+      setScreenMessage(`Updated default content for ${screenId}.`, false);
+    } catch (error) {
+      setScreenMessage(error.message, true);
+    } finally {
+      select.disabled = false;
+    }
+  });
+}
 
 checkAuth().then((authenticated) => {
   if (authenticated) {

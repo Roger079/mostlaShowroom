@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <title>Showroom Admin</title>
   <link rel="stylesheet" href="/css/admin.css">
 </head>
+
 <body>
   <!-- Admin Authentication Modal -->
   <div id="login-overlay" class="login-overlay">
@@ -12,7 +14,8 @@
       <h2>Admin Authentication</h2>
       <p>Please enter the admin password to access controls.</p>
       <form id="login-form">
-        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" required>
+        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password"
+          required>
         <button type="submit" id="login-submit-btn">Unlock Admin</button>
         <div id="login-error" class="login-error"></div>
       </form>
@@ -26,6 +29,7 @@
   <div class="tabs">
     <button id="tab-control" class="tab-btn active">Language Control</button>
     <button id="tab-content" class="tab-btn">Content Library</button>
+    <button id="tab-screens" class="tab-btn">Screen management</button>
   </div>
 
   <section id="panel-control" class="tab-panel active">
@@ -95,7 +99,29 @@
     <div id="content-list"><span class="muted">No content yet.</span></div>
   </section>
 
+  <section id="panel-screens" class="tab-panel">
+    <h2 style="font-size:16px;">Add or update display screen</h2>
+    <div class="content-row">
+      <label for="screen-id-input">Screen ID / Name</label>
+      <input id="screen-id-input" placeholder="e.g. screen2 or lobby-display">
+    </div>
+    <div class="content-row">
+      <label for="screen-default-type">Default Content / Screen Type</label>
+      <select id="screen-default-type">
+        <!-- Options populated dynamically -->
+      </select>
+    </div>
+    <div class="content-actions">
+      <button id="save-screen-btn">Save screen</button>
+    </div>
+    <div id="screen-message"></div>
+
+    <h2 style="font-size:16px; margin-top:24px;">Configured screen roster</h2>
+    <div id="screen-list"><span class="muted">Loading screens...</span></div>
+  </section>
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/admin.js" defer></script>
 </body>
+
 </html>
