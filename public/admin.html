@@ -51,8 +51,8 @@
     <div class="content-row">
       <label for="content-type">Content type</label>
       <select id="content-type">
-        <option value="link">Link (Canva / Genially / webpage)</option>
-        <option value="png">PNG upload</option>
+        <option value="link">Link (Canva / Genially / webpage / Video URL)</option>
+        <option value="png">Media file upload (MKV, MP4, WEBM, PNG, JPG)</option>
       </select>
     </div>
     <div class="content-row">
@@ -65,28 +65,29 @@
         <label for="content-provider">Provider label</label>
         <select id="content-provider">
           <option value="link">Generic link</option>
+          <option value="video">Direct Video URL (MP4 / MKV / WEBM)</option>
           <option value="canva">Canva</option>
           <option value="genially">Genially</option>
         </select>
       </div>
       <div class="content-row">
         <label for="content-link-en">English URL</label>
-        <input id="content-link-en" placeholder="https://...">
+        <input id="content-link-en" placeholder="https://... (leave empty if only providing Spanish URL)">
       </div>
       <div class="content-row">
         <label for="content-link-es">Spanish URL</label>
-        <input id="content-link-es" placeholder="https://...">
+        <input id="content-link-es" placeholder="https://... (leave empty to reuse English URL)">
       </div>
     </div>
 
     <div id="png-fields" style="display:none;">
       <div class="content-row">
-        <label for="content-png-en">English PNG</label>
-        <input id="content-png-en" type="file" accept="image/png">
+        <label for="content-png-en">English media file</label>
+        <input id="content-png-en" type="file" accept="video/*,image/*,.mkv,.mp4,.webm,.mov,.m4v,.avi">
       </div>
       <div class="content-row">
-        <label for="content-png-es">Spanish PNG</label>
-        <input id="content-png-es" type="file" accept="image/png">
+        <label for="content-png-es">Spanish media file (optional if English file uploaded)</label>
+        <input id="content-png-es" type="file" accept="video/*,image/*,.mkv,.mp4,.webm,.mov,.m4v,.avi">
       </div>
     </div>
 

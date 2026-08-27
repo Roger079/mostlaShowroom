@@ -149,13 +149,13 @@ function getMediaTypeForLanguage(lang) {
   }
   if (assignedContent.type === 'asset') {
     const file = assignedContent.files?.[lang] || '';
-    if (/\.(mp4|webm|mov|m4v)$/i.test(file)) return 'video';
+    if (/\.(mp4|mkv|webm|mov|m4v|avi|wmv|ogv|flv|3gp)$/i.test(file)) return 'video';
     if (/\.gif$/i.test(file)) return 'gif';
     return 'image';
   }
   if (assignedContent.type === 'link') {
     const url = assignedContent.urls?.[lang] || '';
-    if (assignedContent.provider === 'video' || /\.(mp4|webm|mov|m4v)($|\?)/i.test(url)) return 'video';
+    if (assignedContent.provider === 'video' || /\.(mp4|mkv|webm|mov|m4v|avi|wmv|ogv|flv|3gp)($|\?)/i.test(url)) return 'video';
     if (/\.gif($|\?)/i.test(url)) return 'gif';
     if (/\.(png|jpg|jpeg|webp|svg)($|\?)/i.test(url)) return 'image';
     return 'embed';
@@ -175,12 +175,20 @@ function updateMediaSources() {
     const srcEn = getValidDisplayUrl(assignedContent.urls?.en);
     const srcEs = getValidDisplayUrl(assignedContent.urls?.es);
     if (langEnType === 'video' && srcEn) {
-      if (videoEn.src !== new URL(srcEn, location.origin).href) videoEn.src = srcEn;
+      const fullUrlEn = new URL(srcEn, location.origin).href;
+      if (videoEn.src !== fullUrlEn) {
+        videoEn.src = srcEn;
+        videoEn.load();
+      }
     } else if (srcEn) {
       imgEn.src = srcEn;
     }
     if (langEsType === 'video' && srcEs) {
-      if (videoEs.src !== new URL(srcEs, location.origin).href) videoEs.src = srcEs;
+      const fullUrlEs = new URL(srcEs, location.origin).href;
+      if (videoEs.src !== fullUrlEs) {
+        videoEs.src = srcEs;
+        videoEs.load();
+      }
     } else if (srcEs) {
       imgEs.src = srcEs;
     }
@@ -190,14 +198,22 @@ function updateMediaSources() {
 
     if (langEnType === 'video') {
       const srcEn = `/assets/${fileEn}`;
-      if (videoEn.src !== new URL(srcEn, location.origin).href) videoEn.src = srcEn;
+      const fullUrlEn = new URL(srcEn, location.origin).href;
+      if (videoEn.src !== fullUrlEn) {
+        videoEn.src = srcEn;
+        videoEn.load();
+      }
     } else {
       imgEn.src = `/assets/${fileEn}`;
     }
 
     if (langEsType === 'video') {
       const srcEs = `/assets/${fileEs}`;
-      if (videoEs.src !== new URL(srcEs, location.origin).href) videoEs.src = srcEs;
+      const fullUrlEs = new URL(srcEs, location.origin).href;
+      if (videoEs.src !== fullUrlEs) {
+        videoEs.src = srcEs;
+        videoEs.load();
+      }
     } else {
       imgEs.src = `/assets/${fileEs}`;
     }

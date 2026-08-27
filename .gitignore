@@ -40,3 +40,4 @@ tmp/
 temp/
 *.tmp
 *.bak
+data/screens.json

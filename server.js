@@ -302,15 +302,15 @@ function getScreenTypes() {
   const allTypes = new Map(assetMap);
 
   for (const [screenType, config] of customLinks.entries()) {
-    if (config.urls.en && config.urls.es) {
-      addLanguageEntry(allTypes, screenType, 'en');
-      addLanguageEntry(allTypes, screenType, 'es');
+    if (config.urls.en || config.urls.es) {
+      if (config.urls.en) addLanguageEntry(allTypes, screenType, 'en');
+      if (config.urls.es) addLanguageEntry(allTypes, screenType, 'es');
     }
   }
 
   const screenTypes = [];
   for (const [prefix, languages] of allTypes.entries()) {
-    if (languages.has('en') && languages.has('es')) {
+    if (languages.has('en') || languages.has('es')) {
       screenTypes.push(prefix);
     }
   }
@@ -541,17 +541,20 @@ app.get('/custom-contents', (_req, res) => {
 app.post('/custom-contents/link', requireAdminAuth, (req, res) => {
   const screenType = normalizeScreenType(req.body?.screenType);
   const provider = String(req.body?.provider || 'link').trim().toLowerCase();
-  const urlEn = String(req.body?.urlEn || '').trim();
-  const urlEs = String(req.body?.urlEs || '').trim();
+  const rawUrlEn = String(req.body?.urlEn || '').trim();
+  const rawUrlEs = String(req.body?.urlEs || '').trim();
+
+  const urlEn = rawUrlEn || rawUrlEs;
+  const urlEs = rawUrlEs || rawUrlEn;
 
   if (!screenType) {
     return res.status(400).json({ error: 'screenType is required' });
   }
-  if (!urlEn || !urlEs) {
-    return res.status(400).json({ error: 'urlEn and urlEs are required' });
+  if (!urlEn && !urlEs) {
+    return res.status(400).json({ error: 'At least one URL (English or Spanish) is required' });
   }
-  if (!URL.canParse(urlEn) || !URL.canParse(urlEs)) {
-    return res.status(400).json({ error: 'Both URLs must be valid' });
+  if ((urlEn && !URL.canParse(urlEn)) || (urlEs && !URL.canParse(urlEs))) {
+    return res.status(400).json({ error: 'Provided URLs must be valid' });
   }
 
   customLinks.set(screenType, {
@@ -564,13 +567,41 @@ app.post('/custom-contents/link', requireAdminAuth, (req, res) => {
 });
 
 /**
- * POST /custom-contents/png
- * Admin endpoint to upload a PNG image asset as Base64 payload.
+ * Resolves file extension for media uploads from filename or dataUrl mime-type.
+ * @param {string} fileName - Uploaded file name.
+ * @param {string} dataUrl - Data URL string.
+ * @returns {string} File extension string (e.g. 'mkv', 'mp4', 'png').
  */
-app.post('/custom-contents/png', requireAdminAuth, (req, res) => {
+function getFileExtension(fileName, dataUrl) {
+  if (fileName) {
+    const ext = path.extname(fileName).toLowerCase().replace('.', '');
+    if (ext) return ext;
+  }
+  const match = dataUrl.match(/^data:([^;]+);base64,/);
+  if (match) {
+    const mime = match[1].toLowerCase();
+    if (mime.includes('matroska') || mime.includes('mkv')) return 'mkv';
+    if (mime.includes('video/mp4')) return 'mp4';
+    if (mime.includes('video/webm')) return 'webm';
+    if (mime.includes('video/quicktime')) return 'mov';
+    if (mime.includes('video/x-msvideo')) return 'avi';
+    if (mime.includes('image/png')) return 'png';
+    if (mime.includes('image/jpeg')) return 'jpg';
+    if (mime.includes('image/gif')) return 'gif';
+    if (mime.includes('image/webp')) return 'webp';
+    if (mime.includes('image/svg')) return 'svg';
+  }
+  return 'png';
+}
+
+/**
+ * Handles uploading media asset files (images & videos including MKV, MP4, WEBM, PNG).
+ */
+function handleMediaUpload(req, res) {
   const screenType = normalizeScreenType(req.body?.screenType);
   const language = String(req.body?.language || '').trim().toLowerCase();
   const dataUrl = String(req.body?.dataUrl || '');
+  const fileName = String(req.body?.fileName || '').trim();
 
   if (!screenType) {
     return res.status(400).json({ error: 'screenType is required' });
@@ -578,22 +609,44 @@ app.post('/custom-contents/png', requireAdminAuth, (req, res) => {
   if (language !== 'en' && language !== 'es') {
     return res.status(400).json({ error: 'language must be en or es' });
   }
-  if (!dataUrl.startsWith('data:image/png;base64,')) {
-    return res.status(400).json({ error: 'Only base64 PNG uploads are supported' });
+  if (!dataUrl.includes(';base64,')) {
+    return res.status(400).json({ error: 'Valid base64 data URL is required' });
   }
 
-  const base64Payload = dataUrl.substring('data:image/png;base64,'.length);
+  const base64Payload = dataUrl.split(';base64,')[1];
   if (!base64Payload) {
-    return res.status(400).json({ error: 'PNG payload is empty' });
+    return res.status(400).json({ error: 'File payload is empty' });
   }
 
-  const outputName = `${screenType}-${language}.png`;
-  const outputPath = path.join(__dirname, 'public', 'assets', outputName);
+  const ext = getFileExtension(fileName, dataUrl);
+  const assetsDir = path.join(__dirname, 'public', 'assets');
+  if (!fs.existsSync(assetsDir)) {
+    fs.mkdirSync(assetsDir, { recursive: true });
+  }
+
+  // Remove existing asset files matching screenType and language prefix to avoid conflicts
+  const existingFiles = fs.readdirSync(assetsDir);
+  for (const f of existingFiles) {
+    const parsed = parseContentLanguage(path.parse(f).name);
+    if (parsed && parsed.prefix === screenType && parsed.lang === language) {
+      try { fs.unlinkSync(path.join(assetsDir, f)); } catch (_) {}
+    }
+  }
+
+  const outputName = `${screenType}-${language}.${ext}`;
+  const outputPath = path.join(assetsDir, outputName);
   const outputBuffer = Buffer.from(base64Payload, 'base64');
   fs.writeFileSync(outputPath, outputBuffer);
   io.emit('content-library-changed');
   return res.status(201).json({ ok: true, file: outputName });
-});
+}
+
+/**
+ * POST /custom-contents/media & /custom-contents/png
+ * Admin endpoints to upload image/video assets (MKV, MP4, PNG, etc.) as Base64 payloads.
+ */
+app.post('/custom-contents/media', requireAdminAuth, handleMediaUpload);
+app.post('/custom-contents/png', requireAdminAuth, handleMediaUpload);
 
 /**
  * DELETE /custom-contents/:screenType

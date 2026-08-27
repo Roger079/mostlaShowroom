@@ -424,11 +424,20 @@ function updateContentFields() {
  * @returns {Promise<void>}
  */
 async function saveLinkContent(screenType) {
+  const rawUrlEn = contentLinkEnEl.value.trim();
+  const rawUrlEs = contentLinkEsEl.value.trim();
+  const urlEn = rawUrlEn || rawUrlEs;
+  const urlEs = rawUrlEs || rawUrlEn;
+
+  if (!urlEn && !urlEs) {
+    throw new Error('Please provide at least one URL (English or Spanish)');
+  }
+
   const payload = {
     screenType,
     provider: contentProviderEl.value,
-    urlEn: contentLinkEnEl.value.trim(),
-    urlEs: contentLinkEsEl.value.trim()
+    urlEn,
+    urlEs
   };
   const response = await fetch('/custom-contents/link', {
     method: 'POST',
@@ -442,33 +451,52 @@ async function saveLinkContent(screenType) {
 }
 
 /**
- * Reads English and Spanish PNG files as Data URLs and uploads them via `/custom-contents/png`.
- * @param {string} screenType - Screen type key to attach PNG images to.
+ * Reads English and/or Spanish media files and uploads them.
+ * Automatically duplicates content for both languages if only one file is uploaded.
+ * @param {string} screenType - Screen type key to attach media files to.
  * @returns {Promise<void>}
  */
 async function savePngContent(screenType) {
-  const files = [
-    { lang: 'en', file: contentPngEnEl.files[0] },
-    { lang: 'es', file: contentPngEsEl.files[0] }
-  ];
-  for (const item of files) {
-    if (!item.file) {
-      throw new Error(`Missing ${item.lang.toUpperCase()} PNG file`);
-    }
-    const dataUrl = await readFileAsDataUrl(item.file);
-    const response = await fetch('/custom-contents/png', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-      body: JSON.stringify({
-        screenType,
-        language: item.lang,
-        dataUrl
-      })
-    });
-    if (!response.ok) {
-      const body = await response.json();
-      throw new Error(body.error || `Unable to upload ${item.lang.toUpperCase()} PNG`);
-    }
+  const fileEn = contentPngEnEl.files[0];
+  const fileEs = contentPngEsEl.files[0];
+
+  if (!fileEn && !fileEs) {
+    throw new Error('Please select at least one media file (English or Spanish)');
+  }
+
+  const uploadEn = fileEn || fileEs;
+  const uploadEs = fileEs || fileEn;
+
+  const dataUrlEn = await readFileAsDataUrl(uploadEn);
+  const responseEn = await fetch('/custom-contents/media', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+    body: JSON.stringify({
+      screenType,
+      language: 'en',
+      fileName: uploadEn.name,
+      dataUrl: dataUrlEn
+    })
+  });
+  if (!responseEn.ok) {
+    const body = await responseEn.json();
+    throw new Error(body.error || 'Unable to upload EN media file');
+  }
+
+  const dataUrlEs = (uploadEs === uploadEn) ? dataUrlEn : await readFileAsDataUrl(uploadEs);
+  const responseEs = await fetch('/custom-contents/media', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+    body: JSON.stringify({
+      screenType,
+      language: 'es',
+      fileName: uploadEs.name,
+      dataUrl: dataUrlEs
+    })
+  });
+  if (!responseEs.ok) {
+    const body = await responseEs.json();
+    throw new Error(body.error || 'Unable to upload ES media file');
   }
 }
 
