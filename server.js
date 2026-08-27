@@ -229,9 +229,10 @@ function loadScreens() {
     const screensList = Array.isArray(parsed?.screens) ? parsed.screens : [];
     displays.clear();
     for (const screen of screensList) {
-      const screenId = String(screen.name || '').trim();
+      const screenId = normalizeScreenType(screen.name || screen.screenId);
       if (!screenId) continue;
-      const screenType = getDefaultScreenType(screen.defaultScreenType || screenId);
+      const configuredType = screen.defaultScreenType || screen.screenType || screenId;
+      const screenType = getDefaultScreenType(configuredType);
       displays.set(screenId, {
         screenId,
         screenType,
@@ -323,13 +324,13 @@ function getScreenTypes() {
  * @param {string} screenId - Screen ID or screen type requested by the client.
  * @returns {string} Resolved valid screen type.
  */
-function getDefaultScreenType(screenId) {
-  const screenTypes = getScreenTypes();
-  const normalizedScreenId = normalizeScreenType(screenId);
-  if (screenTypes.includes(normalizedScreenId)) {
-    return normalizedScreenId;
+function getDefaultScreenType(screenType) {
+  const validScreenTypes = getScreenTypes();
+  const normalized = normalizeScreenType(screenType);
+  if (normalized && validScreenTypes.includes(normalized)) {
+    return normalized;
   }
-  return screenTypes[0] || normalizedScreenId;
+  return validScreenTypes[0] || normalized;
 }
 
 /**
@@ -701,23 +702,21 @@ io.on('connection', (socket) => {
    * Only allows connections from screens defined in screens.json.
    */
   socket.on('register-display', (payload) => {
-    const displayId = typeof payload === 'object' && payload
-      ? payload.displayId || payload.screenId || payload.screenType
+    const rawId = typeof payload === 'object' && payload
+      ? payload.screenId || payload.displayId
       : payload;
 
-    const screenKey = String(displayId || '').trim();
+    const screenKey = normalizeScreenType(rawId);
     const display = displays.get(screenKey);
 
     if (!display) {
-      console.warn(`[Socket] Connection rejected for unregistered display: "${displayId}"`);
-      socket.emit('error', { message: `Display "${displayId}" is not registered in screens.json` });
+      console.warn(`[Socket] Connection rejected for unregistered display: "${rawId}"`);
+      socket.emit('error', { message: `Display "${rawId}" is not registered in screens.json` });
       return;
     }
 
-    const requestedScreenType = typeof payload === 'object' && payload
-      ? payload.screenType
-      : null;
-    const screenType = getDefaultScreenType(requestedScreenType || display.screenType);
+    // Use the display's configured screenType from screens.json/memory
+    const screenType = getDefaultScreenType(display.screenType);
 
     display.connected = true;
     display.socketId = socket.id;

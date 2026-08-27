@@ -284,7 +284,7 @@ const socket = io();
 
 socket.on('connect', () => {
   statusEl.textContent = `${displayId} — connected`;
-  socket.emit('register-display', { displayId, screenType: currentScreenType });
+  socket.emit('register-display', { displayId, screenId: displayId });
   socket.emit('request-state');
 });
 
