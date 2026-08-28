@@ -292,6 +292,30 @@ async function readFileAsDataUrl(file) {
 }
 
 /**
+ * Safely extracts error message from fetch response, handling JSON and non-JSON (HTML/text) error bodies.
+ * @param {Response} response - Fetch response object.
+ * @param {string} fallbackMsg - Default error message if parsing fails.
+ * @returns {Promise<string>} Detailed error message.
+ */
+async function getErrorMessage(response, fallbackMsg = 'Request failed') {
+  try {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body = await response.json();
+      if (body && body.error) return body.error;
+    }
+    if (response.status === 413) {
+      return 'File size exceeds server upload limit (max 500MB).';
+    }
+    const text = await response.text();
+    if (text && text.trim() && !text.startsWith('<!DOCTYPE') && !text.startsWith('<html')) {
+      return text.trim();
+    }
+  } catch (_) {}
+  return `${fallbackMsg} (${response.status} ${response.statusText || ''})`.trim();
+}
+
+/**
  * Fetches valid screen types from `/screen-types` endpoint and populates `screenTypes` state array.
  * @returns {Promise<void>}
  */
@@ -392,8 +416,8 @@ async function saveScreen(screenIdParam, defaultScreenTypeParam) {
     body: JSON.stringify({ screenId, defaultScreenType })
   });
   if (!response.ok) {
-    const body = await response.json();
-    throw new Error(body.error || 'Unable to save screen');
+    const errMsg = await getErrorMessage(response, 'Unable to save screen');
+    throw new Error(errMsg);
   }
 }
 
@@ -403,8 +427,8 @@ async function deleteScreen(screenId) {
     headers: { 'Authorization': `Bearer ${adminToken}` }
   });
   if (!response.ok) {
-    const body = await response.json();
-    throw new Error(body.error || 'Unable to delete screen');
+    const errMsg = await getErrorMessage(response, 'Unable to delete screen');
+    throw new Error(errMsg);
   }
 }
 
@@ -445,8 +469,8 @@ async function saveLinkContent(screenType) {
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    const body = await response.json();
-    throw new Error(body.error || 'Unable to save link content');
+    const errMsg = await getErrorMessage(response, 'Unable to save link content');
+    throw new Error(errMsg);
   }
 }
 
@@ -479,8 +503,8 @@ async function savePngContent(screenType) {
     })
   });
   if (!responseEn.ok) {
-    const body = await responseEn.json();
-    throw new Error(body.error || 'Unable to upload EN media file');
+    const errMsg = await getErrorMessage(responseEn, 'Unable to upload EN media file');
+    throw new Error(errMsg);
   }
 
   const dataUrlEs = (uploadEs === uploadEn) ? dataUrlEn : await readFileAsDataUrl(uploadEs);
@@ -495,8 +519,8 @@ async function savePngContent(screenType) {
     })
   });
   if (!responseEs.ok) {
-    const body = await responseEs.json();
-    throw new Error(body.error || 'Unable to upload ES media file');
+    const errMsg = await getErrorMessage(responseEs, 'Unable to upload ES media file');
+    throw new Error(errMsg);
   }
 }
 
@@ -527,8 +551,8 @@ async function deleteContent(screenType) {
     headers: { 'Authorization': `Bearer ${adminToken}` }
   });
   if (!response.ok) {
-    const body = await response.json();
-    throw new Error(body.error || 'Unable to delete content');
+    const errMsg = await getErrorMessage(response, 'Unable to delete content');
+    throw new Error(errMsg);
   }
 }
 

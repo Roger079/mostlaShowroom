@@ -14,7 +14,8 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.static('public'));
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
 // ---- Security & Authentication ----
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -803,6 +804,20 @@ io.on('connection', (socket) => {
       }
     }
   });
+});
+
+/**
+ * Express error handling middleware to ensure all errors (including body parser limits) return JSON instead of HTML error pages.
+ */
+app.use((err, _req, res, _next) => {
+  if (err) {
+    const statusCode = err.status || err.statusCode || 500;
+    let errorMessage = err.message || 'Internal server error';
+    if (err.type === 'entity.too.large') {
+      errorMessage = `File payload is too large for the server limit (${err.limit ? Math.round(err.limit / (1024 * 1024)) + 'MB' : '500MB'} max).`;
+    }
+    return res.status(statusCode).json({ error: errorMessage });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
