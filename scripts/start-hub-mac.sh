@@ -8,9 +8,10 @@ REPO_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 CONFIG_FILE="$SCRIPT_DIR/hub-config.json"
 LOG_DIR="$HOME/Library/Logs"
 mkdir -p "$LOG_DIR"
+SERVER_LOG="$LOG_DIR/mostla-server.log"
 TUNNEL_LOG="$LOG_DIR/mostla-cloudflared.log"
 
-PORT=3000
+PORT=3002
 ADMIN_PASSWORD=""
 CLOUDFLARE_TOKEN=""
 NO_TUNNEL=false
@@ -39,7 +40,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 echo -e "${CYAN}${BOLD}=====================================================${RESET_COLOR}"
-echo -e "${CYAN}${BOLD}       MOSTLA SHOWROOM — HUB SERVER (macOS)         ${RESET_COLOR}"
+echo -e "${CYAN}${BOLD}    MOSTLA SHOWROOM — HUB SERVER (macOS : PORT ${PORT})   ${RESET_COLOR}"
 echo -e "${CYAN}${BOLD}=====================================================${RESET_COLOR}"
 
 # Ensure Homebrew and standard macOS paths are available in PATH
@@ -67,10 +68,7 @@ if [ "$RESET_CONFIG" = true ] || [ ! -f "$CONFIG_FILE" ]; then
     if [ -t 0 ]; then
         # Interactive mode
         echo ""
-        echo -e "${YELLOW}--- Initial Hub Configuration ---${RESET_COLOR}"
-        read -p "Enter server PORT [3000]: " INPUT_PORT
-        PORT=${INPUT_PORT:-$PORT}
-
+        echo -e "${YELLOW}--- Hub Configuration ---${RESET_COLOR}"
         read -p "Enter ADMIN_PASSWORD [admin123]: " INPUT_PW
         ADMIN_PASSWORD=${INPUT_PW:-admin123}
 
@@ -104,15 +102,16 @@ EOF
 else
     # Read saved config
     if [ -f "$CONFIG_FILE" ]; then
-        CONFIG_PORT=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').port || 3000) } catch(e) { console.log(3000) }")
         CONFIG_PW=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').adminPassword || 'admin123') } catch(e) { console.log('admin123') }")
         CONFIG_TOKEN=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').cloudflareToken || '') } catch(e) { console.log('') }")
 
-        PORT=${PORT:-$CONFIG_PORT}
         ADMIN_PASSWORD=${ADMIN_PASSWORD:-$CONFIG_PW}
         if [ -z "$CLOUDFLARE_TOKEN" ]; then
             CLOUDFLARE_TOKEN="$CONFIG_TOKEN"
         fi
+        
+        # Ensure hub-config.json reflects port 3002
+        "$NODE_BIN" -e "try { const fs=require('fs'); const cfg=require('$CONFIG_FILE'); cfg.port=$PORT; fs.writeFileSync('$CONFIG_FILE', JSON.stringify(cfg, null, 2)); } catch(e){}"
     fi
 fi
 
@@ -140,6 +139,14 @@ if [ "$NO_TUNNEL" = false ] && [ -z "$CLOUDFLARED_BIN" ]; then
     NO_TUNNEL=true
 fi
 
+# 4. Check for lingering process occupying port and clean it up
+OCCUPYING_PID=$(lsof -ti :$PORT 2>/dev/null || true)
+if [ -n "$OCCUPYING_PID" ]; then
+    echo -e "${YELLOW}[!] Port $PORT is currently occupied by PID $OCCUPYING_PID. Cleaning up stale process...${RESET_COLOR}"
+    kill -9 $OCCUPYING_PID 2>/dev/null || true
+    sleep 1
+fi
+
 # Process cleanup handler
 SERVER_PID=""
 TUNNEL_PID=""
@@ -159,15 +166,18 @@ cleanup() {
     exit 0
 }
 
-# Trap only termination signals (INT and TERM). Do NOT trap generic EXIT.
+# Trap only termination signals (INT and TERM).
 trap cleanup INT TERM
 
-# 4. Start Hub Server
+# 5. Start Hub Server
 echo ""
-echo -e "${BOLD}Starting Mostla Showroom Hub Server...${RESET_COLOR}"
+echo -e "${BOLD}Starting Mostla Showroom Hub Server on port $PORT...${RESET_COLOR}"
 cd "$REPO_DIR"
 
-HOST="0.0.0.0" PORT="$PORT" ADMIN_PASSWORD="$ADMIN_PASSWORD" "$NODE_BIN" server.js &
+# Clear server log
+> "$SERVER_LOG"
+
+HOST="0.0.0.0" PORT="$PORT" ADMIN_PASSWORD="$ADMIN_PASSWORD" "$NODE_BIN" server.js >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to become responsive on IPv4 127.0.0.1
@@ -178,13 +188,20 @@ for i in {1..30}; do
         READY=true
         break
     fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        break
+    fi
     echo -n "."
     sleep 0.5
 done
 echo ""
 
 if [ "$READY" = false ]; then
-    echo -e "${RED}[ERROR] Hub server failed to respond on http://127.0.0.1:$PORT${RESET_COLOR}"
+    echo -e "${RED}[ERROR] Hub server failed to start or crashed on http://127.0.0.1:$PORT${RESET_COLOR}"
+    echo -e "${YELLOW}Last entries from server log ($SERVER_LOG):${RESET_COLOR}"
+    if [ -f "$SERVER_LOG" ]; then
+        tail -n 25 "$SERVER_LOG"
+    fi
     cleanup
     exit 1
 fi
@@ -192,7 +209,7 @@ fi
 echo -e "${GREEN}[OK]${RESET_COLOR} Server running at: ${BOLD}http://localhost:$PORT${RESET_COLOR} (http://127.0.0.1:$PORT)"
 echo -e "     Admin panel:    ${BOLD}http://localhost:$PORT/admin.html${RESET_COLOR}"
 
-# 5. Start Cloudflare Tunnel
+# 6. Start Cloudflare Tunnel
 if [ "$NO_TUNNEL" = false ] && [ -n "$CLOUDFLARED_BIN" ]; then
     echo ""
     echo -e "${BOLD}Starting Cloudflare Tunnel (protocol: ${CLOUDFLARE_PROTOCOL})...${RESET_COLOR}"
@@ -258,7 +275,8 @@ if [ "$NO_TUNNEL" = false ] && [ -n "$CLOUDFLARED_BIN" ]; then
 fi
 
 echo ""
-echo -e "${GREEN}Hub is running.${RESET_COLOR} Press ${BOLD}Ctrl+C${RESET_COLOR} to stop gracefully."
+echo -e "${GREEN}Hub is running on port $PORT.${RESET_COLOR} Press ${BOLD}Ctrl+C${RESET_COLOR} to stop gracefully."
+echo -e "Server logs: ${CYAN}${SERVER_LOG}${RESET_COLOR}"
 echo -e "Tunnel logs: ${CYAN}${TUNNEL_LOG}${RESET_COLOR}"
 echo ""
 
@@ -266,6 +284,10 @@ echo ""
 while true; do
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
         echo -e "${RED}[ERROR] Node.js hub server stopped unexpectedly!${RESET_COLOR}"
+        echo -e "${YELLOW}Last 25 lines of server log (${SERVER_LOG}):${RESET_COLOR}"
+        if [ -f "$SERVER_LOG" ]; then
+            tail -n 25 "$SERVER_LOG"
+        fi
         cleanup
         exit 1
     fi

@@ -40,7 +40,7 @@ case "$ACTION" in
             echo -e "${YELLOW}Notice: $CONFIG_FILE not found. Creating default configuration...${RESET_COLOR}"
             cat <<EOF > "$CONFIG_FILE"
 {
-  "port": 3000,
+  "port": 3002,
   "adminPassword": "admin123",
   "cloudflareToken": "",
   "configuredAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
