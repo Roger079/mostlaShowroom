@@ -42,7 +42,9 @@ case "$ACTION" in
 {
   "port": 3002,
   "adminPassword": "admin123",
-  "cloudflareToken": "",
+  "tunnelProvider": "ngrok",
+  "ngrokDomain": "tremor-tacky-dandelion.ngrok-free.dev",
+  "ngrokToken": "",
   "configuredAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
@@ -92,7 +94,7 @@ EOF
 
         echo -e "${GREEN}${BOLD}[SUCCESS] Hub service installed and active!${RESET_COLOR}"
         echo ""
-        echo "The server and Cloudflare tunnel will now start automatically when you log into this Mac."
+        echo "The server and tunnel (ngrok) will now start automatically when you log into this Mac."
         echo ""
         echo -e "Logs location:"
         echo -e "  Output: ${CYAN}${STDOUT_LOG}${RESET_COLOR}"
