@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Mostla Showroom — Hub Server & Cloudflare Tunnel Runner for macOS
+# Mostla Showroom — Hub Server & ngrok / Cloudflare Tunnel Runner for macOS
 # ==============================================================================
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -9,14 +9,16 @@ CONFIG_FILE="$SCRIPT_DIR/hub-config.json"
 LOG_DIR="$HOME/Library/Logs"
 mkdir -p "$LOG_DIR"
 SERVER_LOG="$LOG_DIR/mostla-server.log"
-TUNNEL_LOG="$LOG_DIR/mostla-cloudflared.log"
+TUNNEL_LOG="$LOG_DIR/mostla-tunnel.log"
 
 PORT=3002
 ADMIN_PASSWORD=""
+TUNNEL_PROVIDER="ngrok" # 'ngrok' (default for permanent static URL) or 'cloudflare'
+NGROK_DOMAIN="tremor-tacky-dandelion.ngrok-free.dev"
+NGROK_TOKEN=""
 CLOUDFLARE_TOKEN=""
 NO_TUNNEL=false
 RESET_CONFIG=false
-CLOUDFLARE_PROTOCOL="http2"  # 'http2' prevents Error 1033 by bypassing UDP/QUIC firewalls
 
 # Helper colors for terminal output
 BOLD="\033[1m"
@@ -30,8 +32,10 @@ RESET_COLOR="\033[0m"
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --port|-p) PORT="$2"; shift ;;
-        --token|-t) CLOUDFLARE_TOKEN="$2"; shift ;;
-        --protocol) CLOUDFLARE_PROTOCOL="$2"; shift ;;
+        --ngrok-domain|-d) NGROK_DOMAIN="$2"; TUNNEL_PROVIDER="ngrok"; shift ;;
+        --ngrok-token) NGROK_TOKEN="$2"; TUNNEL_PROVIDER="ngrok"; shift ;;
+        --cloudflare) TUNNEL_PROVIDER="cloudflare" ;;
+        --token|-t) CLOUDFLARE_TOKEN="$2"; TUNNEL_PROVIDER="cloudflare"; shift ;;
         --no-tunnel) NO_TUNNEL=true ;;
         --reset|-r) RESET_CONFIG=true ;;
         *) echo "Unknown option: $1" ;;
@@ -40,7 +44,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 echo -e "${CYAN}${BOLD}=====================================================${RESET_COLOR}"
-echo -e "${CYAN}${BOLD}    MOSTLA SHOWROOM — HUB SERVER (macOS : PORT ${PORT})   ${RESET_COLOR}"
+echo -e "${CYAN}${BOLD}  MOSTLA SHOWROOM — HUB SERVER (PORT ${PORT} + ${TUNNEL_PROVIDER^^})  ${RESET_COLOR}"
 echo -e "${CYAN}${BOLD}=====================================================${RESET_COLOR}"
 
 # Ensure Homebrew and standard macOS paths are available in PATH
@@ -73,16 +77,21 @@ if [ "$RESET_CONFIG" = true ] || [ ! -f "$CONFIG_FILE" ]; then
         ADMIN_PASSWORD=${INPUT_PW:-admin123}
 
         echo ""
-        echo "Cloudflare Tunnel mode:"
-        echo "  - Leave blank to use free ad-hoc TryCloudflare (subdomain *.trycloudflare.com)"
-        echo "  - Or enter your Cloudflare Zero Trust Tunnel Token for a fixed domain"
-        read -p "Cloudflare Tunnel Token (optional): " INPUT_TOKEN
-        CLOUDFLARE_TOKEN="${INPUT_TOKEN:-}"
+        echo -e "${YELLOW}--- ngrok Permanent Domain Configuration ---${RESET_COLOR}"
+        echo "Tip: You can use your free permanent ngrok domain (e.g. tremor-tacky-dandelion.ngrok-free.dev)"
+        read -p "ngrok Static Domain [${NGROK_DOMAIN}]: " INPUT_DOMAIN
+        NGROK_DOMAIN=${INPUT_DOMAIN:-$NGROK_DOMAIN}
+
+        read -p "ngrok Authtoken (leave empty if already configured via 'ngrok config add-authtoken'): " INPUT_NGROK_TOKEN
+        NGROK_TOKEN=${INPUT_NGROK_TOKEN:-}
 
         cat <<EOF > "$CONFIG_FILE"
 {
   "port": $PORT,
   "adminPassword": "$ADMIN_PASSWORD",
+  "tunnelProvider": "$TUNNEL_PROVIDER",
+  "ngrokDomain": "$NGROK_DOMAIN",
+  "ngrokToken": "$NGROK_TOKEN",
   "cloudflareToken": "$CLOUDFLARE_TOKEN",
   "configuredAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
@@ -94,6 +103,9 @@ EOF
 {
   "port": $PORT,
   "adminPassword": "${ADMIN_PASSWORD:-admin123}",
+  "tunnelProvider": "$TUNNEL_PROVIDER",
+  "ngrokDomain": "$NGROK_DOMAIN",
+  "ngrokToken": "$NGROK_TOKEN",
   "cloudflareToken": "$CLOUDFLARE_TOKEN",
   "configuredAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
@@ -103,14 +115,22 @@ else
     # Read saved config
     if [ -f "$CONFIG_FILE" ]; then
         CONFIG_PW=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').adminPassword || 'admin123') } catch(e) { console.log('admin123') }")
-        CONFIG_TOKEN=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').cloudflareToken || '') } catch(e) { console.log('') }")
+        CONFIG_PROVIDER=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').tunnelProvider || 'ngrok') } catch(e) { console.log('ngrok') }")
+        CONFIG_DOMAIN=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').ngrokDomain || '') } catch(e) { console.log('') }")
+        CONFIG_NGROK_TOKEN=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').ngrokToken || '') } catch(e) { console.log('') }")
+        CONFIG_CF_TOKEN=$("$NODE_BIN" -e "try { console.log(require('$CONFIG_FILE').cloudflareToken || '') } catch(e) { console.log('') }")
 
         ADMIN_PASSWORD=${ADMIN_PASSWORD:-$CONFIG_PW}
-        if [ -z "$CLOUDFLARE_TOKEN" ]; then
-            CLOUDFLARE_TOKEN="$CONFIG_TOKEN"
+        if [ "$TUNNEL_PROVIDER" = "ngrok" ] && [ -n "$CONFIG_PROVIDER" ]; then
+            TUNNEL_PROVIDER="$CONFIG_PROVIDER"
         fi
-        
-        # Ensure hub-config.json reflects port 3002
+        if [ -n "$CONFIG_DOMAIN" ] && [ "$NGROK_DOMAIN" = "tremor-tacky-dandelion.ngrok-free.dev" ]; then
+            NGROK_DOMAIN="$CONFIG_DOMAIN"
+        fi
+        NGROK_TOKEN=${NGROK_TOKEN:-$CONFIG_NGROK_TOKEN}
+        CLOUDFLARE_TOKEN=${CLOUDFLARE_TOKEN:-$CONFIG_CF_TOKEN}
+
+        # Update port in config file to 3002
         "$NODE_BIN" -e "try { const fs=require('fs'); const cfg=require('$CONFIG_FILE'); cfg.port=$PORT; fs.writeFileSync('$CONFIG_FILE', JSON.stringify(cfg, null, 2)); } catch(e){}"
     fi
 fi
@@ -121,25 +141,52 @@ if [ ! -d "$REPO_DIR/node_modules" ]; then
     (cd "$REPO_DIR" && npm install)
 fi
 
-# 3. Locate or check cloudflared
-CLOUDFLARED_BIN=""
-if command -v cloudflared &>/dev/null; then
-    CLOUDFLARED_BIN="$(command -v cloudflared)"
-elif [ -x "/opt/homebrew/bin/cloudflared" ]; then
-    CLOUDFLARED_BIN="/opt/homebrew/bin/cloudflared"
-elif [ -x "/usr/local/bin/cloudflared" ]; then
-    CLOUDFLARED_BIN="/usr/local/bin/cloudflared"
+# 3. Locate Tunnel CLI (ngrok or cloudflared)
+TUNNEL_BIN=""
+if [ "$NO_TUNNEL" = false ]; then
+    if [ "$TUNNEL_PROVIDER" = "ngrok" ]; then
+        if command -v ngrok &>/dev/null; then
+            TUNNEL_BIN="$(command -v ngrok)"
+        elif [ -x "/opt/homebrew/bin/ngrok" ]; then
+            TUNNEL_BIN="/opt/homebrew/bin/ngrok"
+        elif [ -x "/usr/local/bin/ngrok" ]; then
+            TUNNEL_BIN="/usr/local/bin/ngrok"
+        fi
+
+        if [ -z "$TUNNEL_BIN" ]; then
+            echo -e "${YELLOW}[WARNING] 'ngrok' CLI was not found on your system.${RESET_COLOR}"
+            echo "To install ngrok on macOS, run:"
+            echo -e "    ${CYAN}brew install ngrok/ngrok/ngrok${RESET_COLOR}"
+            echo "Starting local server only without tunnel..."
+            NO_TUNNEL=true
+        else
+            echo -e "${GREEN}[OK]${RESET_COLOR} ngrok CLI found at: ${TUNNEL_BIN}"
+            # Configure authtoken if provided
+            if [ -n "$NGROK_TOKEN" ]; then
+                "$TUNNEL_BIN" config add-authtoken "$NGROK_TOKEN" 2>/dev/null || true
+            fi
+        fi
+    else
+        # Cloudflare fallback
+        if command -v cloudflared &>/dev/null; then
+            TUNNEL_BIN="$(command -v cloudflared)"
+        elif [ -x "/opt/homebrew/bin/cloudflared" ]; then
+            TUNNEL_BIN="/opt/homebrew/bin/cloudflared"
+        elif [ -x "/usr/local/bin/cloudflared" ]; then
+            TUNNEL_BIN="/usr/local/bin/cloudflared"
+        fi
+
+        if [ -z "$TUNNEL_BIN" ]; then
+            echo -e "${YELLOW}[WARNING] 'cloudflared' CLI was not found on your system.${RESET_COLOR}"
+            echo "To install Cloudflare Tunnel on macOS, run:"
+            echo -e "    ${CYAN}brew install cloudflare/cloudflare/cloudflared${RESET_COLOR}"
+            echo "Starting local server only without tunnel..."
+            NO_TUNNEL=true
+        fi
+    fi
 fi
 
-if [ "$NO_TUNNEL" = false ] && [ -z "$CLOUDFLARED_BIN" ]; then
-    echo -e "${YELLOW}[WARNING] 'cloudflared' CLI was not found on your system.${RESET_COLOR}"
-    echo "To install Cloudflare Tunnel on macOS, run:"
-    echo -e "    ${CYAN}brew install cloudflare/cloudflare/cloudflared${RESET_COLOR}"
-    echo "Starting local server only without tunnel..."
-    NO_TUNNEL=true
-fi
-
-# 4. Check for lingering process occupying port and clean it up
+# 4. Check for lingering process occupying port 3002 and clean it up
 OCCUPYING_PID=$(lsof -ti :$PORT 2>/dev/null || true)
 if [ -n "$OCCUPYING_PID" ]; then
     echo -e "${YELLOW}[!] Port $PORT is currently occupied by PID $OCCUPYING_PID. Cleaning up stale process...${RESET_COLOR}"
@@ -155,7 +202,7 @@ cleanup() {
     echo ""
     echo -e "${YELLOW}Stopping services...${RESET_COLOR}"
     if [ -n "$TUNNEL_PID" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
-        echo "Terminating Cloudflare Tunnel (PID: $TUNNEL_PID)..."
+        echo "Terminating Tunnel (PID: $TUNNEL_PID)..."
         kill -SIGINT "$TUNNEL_PID" 2>/dev/null || true
     fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -166,7 +213,7 @@ cleanup() {
     exit 0
 }
 
-# Trap only termination signals (INT and TERM).
+# Trap termination signals (INT and TERM)
 trap cleanup INT TERM
 
 # 5. Start Hub Server
@@ -174,9 +221,7 @@ echo ""
 echo -e "${BOLD}Starting Mostla Showroom Hub Server on port $PORT...${RESET_COLOR}"
 cd "$REPO_DIR"
 
-# Clear server log
 > "$SERVER_LOG"
-
 HOST="0.0.0.0" PORT="$PORT" ADMIN_PASSWORD="$ADMIN_PASSWORD" "$NODE_BIN" server.js >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -206,53 +251,43 @@ if [ "$READY" = false ]; then
     exit 1
 fi
 
-echo -e "${GREEN}[OK]${RESET_COLOR} Server running at: ${BOLD}http://localhost:$PORT${RESET_COLOR} (http://127.0.0.1:$PORT)"
+echo -e "${GREEN}[OK]${RESET_COLOR} Server running at: ${BOLD}http://localhost:$PORT${RESET_COLOR}"
 echo -e "     Admin panel:    ${BOLD}http://localhost:$PORT/admin.html${RESET_COLOR}"
 
-# 6. Start Cloudflare Tunnel
-if [ "$NO_TUNNEL" = false ] && [ -n "$CLOUDFLARED_BIN" ]; then
+# 6. Start Tunnel
+if [ "$NO_TUNNEL" = false ] && [ -n "$TUNNEL_BIN" ]; then
     echo ""
-    echo -e "${BOLD}Starting Cloudflare Tunnel (protocol: ${CLOUDFLARE_PROTOCOL})...${RESET_COLOR}"
-
-    # Clear previous tunnel log
     > "$TUNNEL_LOG"
 
-    if [ -n "$CLOUDFLARE_TOKEN" ]; then
-        echo -e "${CYAN}Running persistent tunnel with Cloudflare Zero Trust token...${RESET_COLOR}"
-        echo -e "${YELLOW}Note: In Cloudflare Zero Trust Dashboard, set Service to: HTTP -> 127.0.0.1:${PORT}${RESET_COLOR}"
-        "$CLOUDFLARED_BIN" tunnel --protocol "$CLOUDFLARE_PROTOCOL" run --token "$CLOUDFLARE_TOKEN" >> "$TUNNEL_LOG" 2>&1 &
-        TUNNEL_PID=$!
-
-        sleep 2
-        if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-            echo -e "${RED}[ERROR] Cloudflare tunnel exited immediately! (Error 1033 cause)${RESET_COLOR}"
-            echo -e "${YELLOW}Tunnel error output:${RESET_COLOR}"
-            tail -n 15 "$TUNNEL_LOG"
-            cleanup
-            exit 1
-        fi
-        echo -e "${GREEN}[OK]${RESET_COLOR} Tunnel connected! Logs: $TUNNEL_LOG"
-    else
-        echo -e "${CYAN}Running TryCloudflare ad-hoc tunnel pointing to http://127.0.0.1:$PORT ...${RESET_COLOR}"
+    if [ "$TUNNEL_PROVIDER" = "ngrok" ]; then
+        echo -e "${BOLD}Starting ngrok Tunnel with fixed domain: ${CYAN}${NGROK_DOMAIN}${RESET_COLOR} ...${RESET_COLOR}"
         
-        "$CLOUDFLARED_BIN" tunnel --protocol "$CLOUDFLARE_PROTOCOL" --url "http://127.0.0.1:$PORT" >> "$TUNNEL_LOG" 2>&1 &
-        TUNNEL_PID=$!
+        # Strip https:// if user passed full URL
+        CLEAN_DOMAIN=$(echo "$NGROK_DOMAIN" | sed -e 's|^https://||' -e 's|^http://||' -e 's|/$||')
+        
+        if [ -n "$CLEAN_DOMAIN" ]; then
+            "$TUNNEL_BIN" http --url="$CLEAN_DOMAIN" "$PORT" >> "$TUNNEL_LOG" 2>&1 &
+            TUNNEL_PID=$!
+        else
+            "$TUNNEL_BIN" http "$PORT" >> "$TUNNEL_LOG" 2>&1 &
+            TUNNEL_PID=$!
+        fi
 
-        # Monitor tunnel log for generated trycloudflare URL
-        echo -n "Acquiring public HTTPS URL"
+        # Wait for ngrok local inspector API to verify active tunnel
+        echo -n "Connecting to ngrok edge"
         PUBLIC_URL=""
-        for i in {1..50}; do
-            if [ -f "$TUNNEL_LOG" ]; then
-                PUBLIC_URL=$(grep -o 'https://[-a-zA-Z0-9@:%._\+~#=]\+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n 1 || true)
+        for i in {1..40}; do
+            if curl -s http://127.0.0.1:4040/api/tunnels &>/dev/null; then
+                PUBLIC_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -n 1 || true)
                 if [ -n "$PUBLIC_URL" ]; then
                     break
                 fi
             fi
             if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
                 echo ""
-                echo -e "${RED}[ERROR] Cloudflare tunnel process exited unexpectedly!${RESET_COLOR}"
-                echo -e "${YELLOW}Log details:${RESET_COLOR}"
-                tail -n 15 "$TUNNEL_LOG"
+                echo -e "${RED}[ERROR] ngrok exited unexpectedly!${RESET_COLOR}"
+                echo -e "${YELLOW}ngrok log details:${RESET_COLOR}"
+                tail -n 20 "$TUNNEL_LOG"
                 cleanup
                 exit 1
             fi
@@ -261,16 +296,30 @@ if [ "$NO_TUNNEL" = false ] && [ -n "$CLOUDFLARED_BIN" ]; then
         done
         echo ""
 
+        if [ -z "$PUBLIC_URL" ] && [ -n "$CLEAN_DOMAIN" ]; then
+            PUBLIC_URL="https://$CLEAN_DOMAIN"
+        fi
+
         if [ -n "$PUBLIC_URL" ]; then
             echo -e "${GREEN}${BOLD}=====================================================${RESET_COLOR}"
-            echo -e "${GREEN}${BOLD} PUBLIC CLOUDFLARE URL ACTIVE:${RESET_COLOR}"
+            echo -e "${GREEN}${BOLD} FIXED PUBLIC NGROK URL ACTIVE:${RESET_COLOR}"
             echo -e "   ${BOLD}${PUBLIC_URL}${RESET_COLOR}"
             echo -e "   Admin:   ${BOLD}${PUBLIC_URL}/admin.html${RESET_COLOR}"
             echo -e "   Display: ${BOLD}${PUBLIC_URL}/display.html?screen=screen1${RESET_COLOR}"
             echo -e "${GREEN}${BOLD}=====================================================${RESET_COLOR}"
-        else
-            echo -e "${YELLOW}[WARNING] Could not parse TryCloudflare URL yet. Check logs: ${TUNNEL_LOG}${RESET_COLOR}"
         fi
+
+    else
+        # Cloudflare Tunnel Mode
+        echo -e "${BOLD}Starting Cloudflare Tunnel (protocol: http2)...${RESET_COLOR}"
+        if [ -n "$CLOUDFLARE_TOKEN" ]; then
+            "$TUNNEL_BIN" tunnel --protocol http2 run --token "$CLOUDFLARE_TOKEN" >> "$TUNNEL_LOG" 2>&1 &
+            TUNNEL_PID=$!
+        else
+            "$TUNNEL_BIN" tunnel --protocol http2 --url "http://127.0.0.1:$PORT" >> "$TUNNEL_LOG" 2>&1 &
+            TUNNEL_PID=$!
+        fi
+        sleep 2
     fi
 fi
 
@@ -280,11 +329,11 @@ echo -e "Server logs: ${CYAN}${SERVER_LOG}${RESET_COLOR}"
 echo -e "Tunnel logs: ${CYAN}${TUNNEL_LOG}${RESET_COLOR}"
 echo ""
 
-# Process supervisor loop: monitors both server and tunnel
+# Supervisor loop: monitors both server and tunnel processes
 while true; do
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
         echo -e "${RED}[ERROR] Node.js hub server stopped unexpectedly!${RESET_COLOR}"
-        echo -e "${YELLOW}Last 25 lines of server log (${SERVER_LOG}):${RESET_COLOR}"
+        echo -e "${YELLOW}Server log (${SERVER_LOG}):${RESET_COLOR}"
         if [ -f "$SERVER_LOG" ]; then
             tail -n 25 "$SERVER_LOG"
         fi
@@ -293,9 +342,11 @@ while true; do
     fi
     if [ "$NO_TUNNEL" = false ] && [ -n "$TUNNEL_PID" ]; then
         if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-            echo -e "${RED}[ERROR] Cloudflare tunnel stopped! (This triggers Cloudflare Error 1033)${RESET_COLOR}"
-            echo -e "${YELLOW}Last 20 lines of tunnel log (${TUNNEL_LOG}):${RESET_COLOR}"
-            tail -n 20 "$TUNNEL_LOG"
+            echo -e "${RED}[ERROR] Tunnel process ($TUNNEL_PROVIDER) stopped unexpectedly!${RESET_COLOR}"
+            echo -e "${YELLOW}Tunnel log (${TUNNEL_LOG}):${RESET_COLOR}"
+            if [ -f "$TUNNEL_LOG" ]; then
+                tail -n 20 "$TUNNEL_LOG"
+            fi
             cleanup
             exit 1
         fi
