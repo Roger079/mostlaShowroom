@@ -821,8 +821,10 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Signage hub running at http://localhost:${PORT}`);
-  console.log(`Admin panel:   http://localhost:${PORT}/admin.html`);
-  console.log(`Display demo:  http://localhost:${PORT}/display.html?screen=screen1`);
+const HOST = process.env.HOST || '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
+  console.log(`Signage hub running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+  console.log(`Admin panel:   http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/admin.html`);
+  console.log(`Display demo:  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/display.html?screen=screen1`);
 });

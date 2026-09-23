@@ -3,17 +3,19 @@
 # Mostla Showroom — Hub Server & Cloudflare Tunnel Runner for macOS
 # ==============================================================================
 
-set -e
-
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 CONFIG_FILE="$SCRIPT_DIR/hub-config.json"
+LOG_DIR="$HOME/Library/Logs"
+mkdir -p "$LOG_DIR"
+TUNNEL_LOG="$LOG_DIR/mostla-cloudflared.log"
 
 PORT=3000
 ADMIN_PASSWORD=""
 CLOUDFLARE_TOKEN=""
 NO_TUNNEL=false
 RESET_CONFIG=false
+CLOUDFLARE_PROTOCOL="http2"  # 'http2' prevents Error 1033 by bypassing UDP/QUIC firewalls
 
 # Helper colors for terminal output
 BOLD="\033[1m"
@@ -28,6 +30,7 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         --port|-p) PORT="$2"; shift ;;
         --token|-t) CLOUDFLARE_TOKEN="$2"; shift ;;
+        --protocol) CLOUDFLARE_PROTOCOL="$2"; shift ;;
         --no-tunnel) NO_TUNNEL=true ;;
         --reset|-r) RESET_CONFIG=true ;;
         *) echo "Unknown option: $1" ;;
@@ -156,21 +159,22 @@ cleanup() {
     exit 0
 }
 
-trap cleanup INT TERM EXIT
+# Trap only termination signals (INT and TERM). Do NOT trap generic EXIT.
+trap cleanup INT TERM
 
 # 4. Start Hub Server
 echo ""
 echo -e "${BOLD}Starting Mostla Showroom Hub Server...${RESET_COLOR}"
 cd "$REPO_DIR"
 
-PORT="$PORT" ADMIN_PASSWORD="$ADMIN_PASSWORD" "$NODE_BIN" server.js &
+HOST="0.0.0.0" PORT="$PORT" ADMIN_PASSWORD="$ADMIN_PASSWORD" "$NODE_BIN" server.js &
 SERVER_PID=$!
 
-# Wait for server to become responsive
-echo -n "Waiting for server to become ready"
+# Wait for server to become responsive on IPv4 127.0.0.1
+echo -n "Waiting for server to become ready on http://127.0.0.1:$PORT"
 READY=false
 for i in {1..30}; do
-    if curl -s "http://localhost:$PORT/api/auth-check" &>/dev/null; then
+    if curl -s "http://127.0.0.1:$PORT/api/auth-check" &>/dev/null; then
         READY=true
         break
     fi
@@ -180,38 +184,60 @@ done
 echo ""
 
 if [ "$READY" = false ]; then
-    echo -e "${RED}[ERROR] Hub server failed to respond on http://localhost:$PORT${RESET_COLOR}"
+    echo -e "${RED}[ERROR] Hub server failed to respond on http://127.0.0.1:$PORT${RESET_COLOR}"
+    cleanup
     exit 1
 fi
 
-echo -e "${GREEN}[OK]${RESET_COLOR} Server running at: ${BOLD}http://localhost:$PORT${RESET_COLOR}"
+echo -e "${GREEN}[OK]${RESET_COLOR} Server running at: ${BOLD}http://localhost:$PORT${RESET_COLOR} (http://127.0.0.1:$PORT)"
 echo -e "     Admin panel:    ${BOLD}http://localhost:$PORT/admin.html${RESET_COLOR}"
 
 # 5. Start Cloudflare Tunnel
 if [ "$NO_TUNNEL" = false ] && [ -n "$CLOUDFLARED_BIN" ]; then
     echo ""
-    echo -e "${BOLD}Starting Cloudflare Tunnel...${RESET_COLOR}"
+    echo -e "${BOLD}Starting Cloudflare Tunnel (protocol: ${CLOUDFLARE_PROTOCOL})...${RESET_COLOR}"
+
+    # Clear previous tunnel log
+    > "$TUNNEL_LOG"
 
     if [ -n "$CLOUDFLARE_TOKEN" ]; then
         echo -e "${CYAN}Running persistent tunnel with Cloudflare Zero Trust token...${RESET_COLOR}"
-        "$CLOUDFLARED_BIN" tunnel run --token "$CLOUDFLARE_TOKEN" &
+        echo -e "${YELLOW}Note: In Cloudflare Zero Trust Dashboard, set Service to: HTTP -> 127.0.0.1:${PORT}${RESET_COLOR}"
+        "$CLOUDFLARED_BIN" tunnel --protocol "$CLOUDFLARE_PROTOCOL" run --token "$CLOUDFLARE_TOKEN" >> "$TUNNEL_LOG" 2>&1 &
         TUNNEL_PID=$!
+
+        sleep 2
+        if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+            echo -e "${RED}[ERROR] Cloudflare tunnel exited immediately! (Error 1033 cause)${RESET_COLOR}"
+            echo -e "${YELLOW}Tunnel error output:${RESET_COLOR}"
+            tail -n 15 "$TUNNEL_LOG"
+            cleanup
+            exit 1
+        fi
+        echo -e "${GREEN}[OK]${RESET_COLOR} Tunnel connected! Logs: $TUNNEL_LOG"
     else
-        echo -e "${CYAN}Running TryCloudflare ad-hoc tunnel pointing to http://localhost:$PORT ...${RESET_COLOR}"
-        TUNNEL_LOG="/tmp/mostla-cloudflared-$$.log"
+        echo -e "${CYAN}Running TryCloudflare ad-hoc tunnel pointing to http://127.0.0.1:$PORT ...${RESET_COLOR}"
         
-        "$CLOUDFLARED_BIN" tunnel --url "http://localhost:$PORT" 2>&1 | tee "$TUNNEL_LOG" &
+        "$CLOUDFLARED_BIN" tunnel --protocol "$CLOUDFLARE_PROTOCOL" --url "http://127.0.0.1:$PORT" >> "$TUNNEL_LOG" 2>&1 &
         TUNNEL_PID=$!
 
         # Monitor tunnel log for generated trycloudflare URL
         echo -n "Acquiring public HTTPS URL"
         PUBLIC_URL=""
-        for i in {1..40}; do
+        for i in {1..50}; do
             if [ -f "$TUNNEL_LOG" ]; then
                 PUBLIC_URL=$(grep -o 'https://[-a-zA-Z0-9@:%._\+~#=]\+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n 1 || true)
                 if [ -n "$PUBLIC_URL" ]; then
                     break
                 fi
+            fi
+            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+                echo ""
+                echo -e "${RED}[ERROR] Cloudflare tunnel process exited unexpectedly!${RESET_COLOR}"
+                echo -e "${YELLOW}Log details:${RESET_COLOR}"
+                tail -n 15 "$TUNNEL_LOG"
+                cleanup
+                exit 1
             fi
             echo -n "."
             sleep 0.5
@@ -225,12 +251,32 @@ if [ "$NO_TUNNEL" = false ] && [ -n "$CLOUDFLARED_BIN" ]; then
             echo -e "   Admin:   ${BOLD}${PUBLIC_URL}/admin.html${RESET_COLOR}"
             echo -e "   Display: ${BOLD}${PUBLIC_URL}/display.html?screen=screen1${RESET_COLOR}"
             echo -e "${GREEN}${BOLD}=====================================================${RESET_COLOR}"
+        else
+            echo -e "${YELLOW}[WARNING] Could not parse TryCloudflare URL yet. Check logs: ${TUNNEL_LOG}${RESET_COLOR}"
         fi
     fi
 fi
 
 echo ""
-echo -e "${YELLOW}Server is running in background. Press Ctrl+C to stop.${RESET_COLOR}"
+echo -e "${GREEN}Hub is running.${RESET_COLOR} Press ${BOLD}Ctrl+C${RESET_COLOR} to stop gracefully."
+echo -e "Tunnel logs: ${CYAN}${TUNNEL_LOG}${RESET_COLOR}"
+echo ""
 
-# Wait indefinitely for background processes
-wait "$SERVER_PID"
+# Process supervisor loop: monitors both server and tunnel
+while true; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo -e "${RED}[ERROR] Node.js hub server stopped unexpectedly!${RESET_COLOR}"
+        cleanup
+        exit 1
+    fi
+    if [ "$NO_TUNNEL" = false ] && [ -n "$TUNNEL_PID" ]; then
+        if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+            echo -e "${RED}[ERROR] Cloudflare tunnel stopped! (This triggers Cloudflare Error 1033)${RESET_COLOR}"
+            echo -e "${YELLOW}Last 20 lines of tunnel log (${TUNNEL_LOG}):${RESET_COLOR}"
+            tail -n 20 "$TUNNEL_LOG"
+            cleanup
+            exit 1
+        fi
+    fi
+    sleep 3
+done
