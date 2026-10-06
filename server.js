@@ -718,6 +718,9 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Join room for this screen so any targeted events reach all instances/tabs
+    socket.join(`display:${screenKey}`);
+
     // Use the display's configured screenType from screens.json/memory
     const screenType = getDefaultScreenType(display.screenType);
 
@@ -785,9 +788,19 @@ io.on('connection', (socket) => {
     displays.set(targetDisplay.screenId, targetDisplay);
     saveScreens();
 
+    const changePayload = {
+      targetScreenId: targetDisplay.screenId,
+      screenType,
+      content: getContentConfig(screenType)
+    };
+
+    // Emit to the specific screen room, socket ID, and broadcast so all display instances update immediately
+    io.to(`display:${targetDisplay.screenId}`).emit('screen-type-changed', changePayload);
     if (targetDisplay.socketId) {
-      io.to(targetDisplay.socketId).emit('screen-type-changed', { screenType, content: getContentConfig(screenType) });
+      io.to(targetDisplay.socketId).emit('screen-type-changed', changePayload);
     }
+    io.emit('screen-type-changed', changePayload);
+
     broadcastDisplayList();
   });
 

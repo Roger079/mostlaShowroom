@@ -252,6 +252,11 @@ function updateMediaSources() {
       }
     } else {
       imgEn.src = `/assets/${fileEn}`;
+      if (videoEn.src) {
+        videoEn.pause();
+        videoEn.removeAttribute('src');
+        videoEn.load();
+      }
     }
 
     if (langEsType === 'video') {
@@ -263,6 +268,11 @@ function updateMediaSources() {
       }
     } else {
       imgEs.src = `/assets/${fileEs}`;
+      if (videoEs.src) {
+        videoEs.pause();
+        videoEs.removeAttribute('src');
+        videoEs.load();
+      }
     }
   }
 }
@@ -293,8 +303,15 @@ function showLanguage(lang) {
     return;
   }
 
-  if (embedEn) embedEn.classList.remove('visible');
-  if (embedEs && embedEs !== embedEn) embedEs.classList.remove('visible');
+  // Not an embed: ensure iframes are hidden and cleared if not needed
+  if (embedEn) {
+    embedEn.classList.remove('visible');
+    if (embedEn.src && !hasQueryEmbeddedDisplay) embedEn.src = 'about:blank';
+  }
+  if (embedEs && embedEs !== embedEn) {
+    embedEs.classList.remove('visible');
+    if (embedEs.src && !hasQueryEmbeddedDisplay) embedEs.src = 'about:blank';
+  }
 
   const isEn = lang === 'en';
   const isEs = lang === 'es';
@@ -358,6 +375,11 @@ socket.on('language-changed', (lang) => {
 });
 
 socket.on('screen-type-changed', (payload) => {
+  // If targeted to a specific screen, verify it matches this displayId
+  if (payload?.targetScreenId && payload.targetScreenId !== displayId) {
+    return;
+  }
+
   if (typeof payload === 'string') {
     setAssignedContent(null);
     setScreenType(payload);
