@@ -1,0 +1,7 @@
+{
+  "port": 3002,
+  "adminPassword": "admin123",
+  "tunnelProvider": "ngrok",
+  "ngrokDomain": "tremor-tacky-dandelion.ngrok-free.dev",
+  "configuredAt": "2026-10-05T21:47:00.000Z"
+}

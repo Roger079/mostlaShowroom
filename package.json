@@ -4,7 +4,8 @@
   "description": "Proof of concept: centralized multi-screen language controller",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "kiosk": "node scripts/launch-kiosk.js"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -517,6 +517,7 @@ app.get('/custom-contents', (_req, res) => {
     rows.push({
       screenType,
       source: 'asset',
+      files: getAssetFiles(screenType),
       hasEnglish: languages.has('en'),
       hasSpanish: languages.has('es')
     });
@@ -527,6 +528,7 @@ app.get('/custom-contents', (_req, res) => {
       screenType,
       source: 'link',
       provider: linkConfig.provider,
+      urls: linkConfig.urls,
       hasEnglish: Boolean(linkConfig.urls.en),
       hasSpanish: Boolean(linkConfig.urls.es)
     });

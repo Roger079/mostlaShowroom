@@ -43,8 +43,35 @@ const loginError = document.getElementById('login-error');
 const logoutBtn = document.getElementById('logout-btn');
 
 /**
+ * Toast Notification System
+ */
+function showToast(message, type = 'info') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast-item ${type}`;
+  const icon = type === 'success' ? '✔' : type === 'error' ? '✖' : 'ℹ';
+  toast.innerHTML = `
+    <span class="toast-icon">${icon}</span>
+    <span class="toast-msg">${escapeHtml(message)}</span>
+  `;
+
+  container.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 15);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 250);
+  }, 2800);
+}
+
+/**
  * Constructs HTTP request headers incorporating the active admin session token.
- * @returns {{ Authorization: string, 'Content-Type': string }} Authorization and content-type headers.
  */
 function authHeaders() {
   return {
@@ -54,30 +81,26 @@ function authHeaders() {
 }
 
 /**
- * Displays the full-screen admin login overlay modal and focuses the password input.
- * @returns {void}
+ * Displays the full-screen admin login overlay modal.
  */
 function showLoginOverlay() {
   loginOverlay.style.display = 'flex';
-  logoutBtn.style.display = 'none';
+  if (logoutBtn) logoutBtn.style.display = 'none';
   loginPassword.value = '';
   loginError.textContent = '';
   setTimeout(() => loginPassword.focus(), 100);
 }
 
 /**
- * Hides the admin login overlay modal and shows the logout button.
- * @returns {void}
+ * Hides the admin login overlay modal.
  */
 function hideLoginOverlay() {
   loginOverlay.style.display = 'none';
-  logoutBtn.style.display = 'inline-block';
+  if (logoutBtn) logoutBtn.style.display = 'inline-block';
 }
 
 /**
  * Verifies current admin authentication token with backend endpoint `/api/auth-check`.
- * Toggles login overlay depending on authentication status.
- * @returns {Promise<boolean>} True if authenticated, false otherwise.
  */
 async function checkAuth() {
   if (!adminToken) {
@@ -100,9 +123,6 @@ async function checkAuth() {
   return false;
 }
 
-/**
- * Handles admin login form submission. Sends password to backend and stores returned auth token.
- */
 loginForm.onsubmit = async (e) => {
   e.preventDefault();
   const password = loginPassword.value;
@@ -118,36 +138,35 @@ loginForm.onsubmit = async (e) => {
       adminToken = data.token;
       sessionStorage.setItem('adminToken', adminToken);
       hideLoginOverlay();
+      showToast('Sesión de administrador iniciada', 'success');
       refreshAdminData().catch((err) => setContentMessage(err.message, true));
     } else {
-      loginError.textContent = data.error || 'Invalid password';
+      loginError.textContent = data.error || 'Contraseña incorrecta';
     }
   } catch (err) {
-    loginError.textContent = 'Connection error. Please try again.';
+    loginError.textContent = 'Error de conexión. Intenta de nuevo.';
   }
 };
 
-/**
- * Handles admin logout action. Invalidate backend session and clear stored session token.
- */
-logoutBtn.onclick = async () => {
-  if (adminToken) {
-    try {
-      await fetch('/api/logout', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${adminToken}` }
-      });
-    } catch (e) { }
-  }
-  adminToken = '';
-  sessionStorage.removeItem('adminToken');
-  showLoginOverlay();
-};
+if (logoutBtn) {
+  logoutBtn.onclick = async () => {
+    if (adminToken) {
+      try {
+        await fetch('/api/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${adminToken}` }
+        });
+      } catch (e) { }
+    }
+    adminToken = '';
+    sessionStorage.removeItem('adminToken');
+    showLoginOverlay();
+    showToast('Sesión cerrada', 'info');
+  };
+}
 
 /**
- * Sanitizes strings to prevent XSS vulnerabilities when inserting dynamic content into HTML.
- * @param {*} value - Input value to sanitize.
- * @returns {string} HTML-escaped string.
+ * Sanitizes strings to prevent XSS vulnerabilities.
  */
 function escapeHtml(value) {
   return String(value)
@@ -160,34 +179,39 @@ function escapeHtml(value) {
 
 /**
  * Updates UI state elements for active language selection ('en' or 'es').
- * @param {'en'|'es'} lang - Selected language code.
- * @returns {void}
  */
 function setActive(lang) {
   currentLang = lang;
   btnEn.classList.toggle('active', lang === 'en');
   btnEs.classList.toggle('active', lang === 'es');
   currentLangEl.textContent = lang === 'en' ? 'English' : 'Español';
+  renderDisplayList();
 }
 
 /**
- * Switches active visible admin tab panel ('control' or 'content').
- * @param {'control'|'content'} tabName - Target tab name.
- * @returns {void}
+ * Switches active visible admin tab panel ('control', 'content', 'screens').
  */
 function showTab(tabName) {
   tabControl.classList.toggle('active', tabName === 'control');
   tabContent.classList.toggle('active', tabName === 'content');
   if (tabScreens) tabScreens.classList.toggle('active', tabName === 'screens');
+  
+  // Mobile bottom navigation bar sync
+  const mobileBtns = document.querySelectorAll('.mobile-nav-btn');
+  mobileBtns.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+
   panelControl.classList.toggle('active', tabName === 'control');
   panelContent.classList.toggle('active', tabName === 'content');
   if (panelScreens) panelScreens.classList.toggle('active', tabName === 'screens');
+
+  // Scroll smoothly to top on mobile tab change
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /**
  * Generates HTML `<option>` markup for screen type drop-down selectors.
- * @param {string} selectedType - Currently selected screen type key.
- * @returns {string} HTML string containing `<option>` elements.
  */
 function getScreenTypeOptions(selectedType) {
   return screenTypes
@@ -199,25 +223,184 @@ function getScreenTypeOptions(selectedType) {
 }
 
 /**
- * Renders the custom content library entries into the content panel DOM element.
- * @returns {void}
+ * Generates rich visual thumbnail HTML for a given screen type and language.
+ */
+function getThumbnailHtml(screenType, lang = currentLang) {
+  const item = customContents.find(c => c.screenType === screenType);
+  if (!item) {
+    return `
+      <div class="thumb-placeholder">
+        <span class="thumb-icon">📺</span>
+        <span class="thumb-label">${escapeHtml(screenType)}</span>
+      </div>
+    `;
+  }
+
+  if (item.source === 'asset') {
+    const file = item.files?.[lang] || item.files?.en || item.files?.es || '';
+    if (!file) {
+      return `
+        <div class="thumb-placeholder">
+          <span class="thumb-icon">🖼️</span>
+          <span class="thumb-label">${escapeHtml(screenType)}</span>
+        </div>
+      `;
+    }
+    const isVideo = /\.(mp4|mkv|webm|mov|m4v|avi|wmv)$/i.test(file);
+    if (isVideo) {
+      return `
+        <div class="thumb-media-box">
+          <video class="thumb-preview" src="/assets/${escapeHtml(file)}#t=0.5" preload="metadata" muted playsinline></video>
+          <span class="thumb-badge video">▶ Video</span>
+        </div>
+      `;
+    }
+    return `
+      <div class="thumb-media-box">
+        <img class="thumb-preview" src="/assets/${escapeHtml(file)}" alt="${escapeHtml(screenType)}" loading="lazy">
+        <span class="thumb-badge image">🖼 Imagen</span>
+      </div>
+    `;
+  }
+
+  // Link source (Canva, Genially, video stream, generic web)
+  const provider = (item.provider || 'link').toLowerCase();
+  let badgeClass = 'link';
+  let icon = '🌐';
+  let providerName = 'Enlace Web';
+
+  if (provider === 'canva') {
+    badgeClass = 'canva';
+    icon = '🎨';
+    providerName = 'Canva';
+  } else if (provider === 'genially') {
+    badgeClass = 'genially';
+    icon = '✨';
+    providerName = 'Genially';
+  } else if (provider === 'video') {
+    badgeClass = 'video';
+    icon = '🎬';
+    providerName = 'Video Stream';
+  }
+
+  const targetUrl = item.urls?.[lang] || item.urls?.en || item.urls?.es || '';
+
+  return `
+    <div class="thumb-embed-box ${badgeClass}">
+      <span class="thumb-embed-icon">${icon}</span>
+      <span class="thumb-embed-title">${providerName}</span>
+      ${targetUrl ? `<a href="${escapeHtml(targetUrl)}" target="_blank" rel="noopener noreferrer" class="thumb-preview-link" title="Abrir en pestaña nueva">↗ Abrir</a>` : ''}
+      <span class="thumb-badge ${badgeClass}">${provider.toUpperCase()}</span>
+    </div>
+  `;
+}
+
+/**
+ * Renders the custom content library entries into the content panel with rich thumbnails.
  */
 function renderContentList() {
   if (customContents.length === 0) {
-    contentListEl.innerHTML = '<span class="muted">No content yet.</span>';
+    contentListEl.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📁</div>
+        <div class="empty-title">No hay contenidos en la biblioteca</div>
+        <div class="empty-subtitle">Agrega un enlace web o sube archivos multimedia arriba.</div>
+      </div>
+    `;
     return;
   }
 
-  contentListEl.innerHTML = customContents
-    .map(content => {
-      const completeness = content.hasEnglish && content.hasSpanish ? 'ready' : 'missing language';
-      const provider = content.provider ? ` / ${escapeHtml(content.provider)}` : '';
+  contentListEl.innerHTML = `
+    <div class="content-library-grid">
+      ${customContents
+        .map(content => {
+          const isReady = content.hasEnglish && content.hasSpanish;
+          const completeness = isReady ? 'Bilingüe (EN/ES)' : (content.hasEnglish ? 'Solo Inglés' : 'Solo Español');
+          const thumbHtml = getThumbnailHtml(content.screenType, currentLang);
+          const provider = content.provider ? ` (${escapeHtml(content.provider)})` : '';
+
+          return `
+            <div class="library-card">
+              <div class="library-card-thumb">
+                ${thumbHtml}
+              </div>
+              <div class="library-card-body">
+                <div class="library-card-header">
+                  <strong>${escapeHtml(content.screenType)}</strong>
+                  <span class="library-type-tag">${escapeHtml(content.source)}${provider}</span>
+                </div>
+                <div class="library-status ${isReady ? 'ready' : 'warning'}">
+                  ${isReady ? '✔' : '⚠'} ${completeness}
+                </div>
+                <div class="library-actions">
+                  <button class="danger delete-content-btn" data-screen-type="${escapeHtml(content.screenType)}">
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+/**
+ * Renders the list of active connected displays into the showroom grid with visual thumbnails.
+ */
+function renderDisplayList() {
+  const countBadge = document.getElementById('display-count-badge');
+  const onlineCount = connectedDisplays.filter(d => d.connected).length;
+  if (countBadge) {
+    countBadge.textContent = `${onlineCount} de ${connectedDisplays.length} en línea`;
+  }
+
+  if (connectedDisplays.length === 0) {
+    listEl.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📺</div>
+        <div class="empty-title">No hay pantallas conectadas</div>
+        <div class="empty-subtitle">Inicia una pantalla con <code>npm run kiosk</code> o abre <code>display.html?screen=screen1</code></div>
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = connectedDisplays
+    .map(d => {
+      const isOnline = Boolean(d.connected);
+      const statusLabel = isOnline ? 'En línea' : 'Desconectada';
+      const statusClass = isOnline ? 'online' : 'offline';
+      const thumbHtml = getThumbnailHtml(d.screenType, currentLang);
+      const displayUrl = `/display.html?screen=${encodeURIComponent(d.screenId)}`;
+
       return `
-        <div class="content-card">
-          <div><strong>${escapeHtml(content.screenType)}</strong> — ${escapeHtml(content.source)}${provider}</div>
-          <div class="muted">Status: ${escapeHtml(completeness)}</div>
-          <div class="content-actions">
-            <button class="danger delete-content-btn" data-screen-type="${escapeHtml(content.screenType)}">Delete</button>
+        <div class="display-card ${statusClass}">
+          <div class="display-card-thumb">
+            ${thumbHtml}
+          </div>
+          <div class="display-card-body">
+            <div class="display-card-header">
+              <div class="display-title-wrap">
+                <span class="pulse-dot ${statusClass}" title="${statusLabel}"></span>
+                <span class="display-name">${escapeHtml(d.screenId)}</span>
+              </div>
+              <span class="display-status-tag ${statusClass}">${statusLabel}</span>
+            </div>
+
+            <div class="display-control-row">
+              <label class="control-label">Contenido Asignado</label>
+              <select class="screen-type-select" data-screen-id="${escapeHtml(d.screenId)}" data-socket-id="${d.socketId || ''}">
+                ${getScreenTypeOptions(d.screenType)}
+              </select>
+            </div>
+
+            <div class="display-card-footer">
+              <a href="${displayUrl}" target="_blank" rel="noopener noreferrer" class="preview-btn">
+                <span>🖥️</span> Abrir Display
+              </a>
+            </div>
           </div>
         </div>
       `;
@@ -226,48 +409,13 @@ function renderContentList() {
 }
 
 /**
- * Renders the list of active connected displays into the control panel DOM element.
- * @returns {void}
- */
-function renderDisplayList() {
-  if (connectedDisplays.length === 0) {
-    listEl.innerHTML = '<span id="empty">No displays configured yet</span>';
-    return;
-  }
-
-  listEl.innerHTML = connectedDisplays
-    .map(d => {
-      const isOnline = Boolean(d.connected);
-      const dotColor = isOnline ? '#0F6E56' : '#94a3b8';
-      const statusLabel = isOnline ? 'online' : 'offline';
-      return `
-        <div class="display-row" style="opacity: ${isOnline ? '1' : '0.65'};">
-          <span><span class="dot" style="background: ${dotColor};"></span>${escapeHtml(d.screenId)} <span class="muted">(${statusLabel})</span></span>
-          <select class="screen-type-select" data-screen-id="${escapeHtml(d.screenId)}" data-socket-id="${d.socketId || ''}">
-            ${getScreenTypeOptions(d.screenType)}
-          </select>
-        </div>
-      `;
-    })
-    .join('');
-}
-
-/**
  * Displays status or error feedback message to the user in the admin content tab.
- * @param {string} message - Message text to display.
- * @param {boolean} isError - True if error message (red styling), false if success/info.
- * @returns {void}
  */
 function setContentMessage(message, isError) {
   contentMessageEl.textContent = message;
-  contentMessageEl.style.color = isError ? '#a20000' : '#0F6E56';
+  contentMessageEl.style.color = isError ? '#DC2626' : '#16A34A';
 }
 
-/**
- * Normalizes client-side input string into a slugified screen type key.
- * @param {string} value - Raw screen type input string.
- * @returns {string} Cleaned screen type slug key.
- */
 function normalizeScreenType(value) {
   return String(value || '')
     .trim()
@@ -277,11 +425,6 @@ function normalizeScreenType(value) {
     .replace(/^-|-$/g, '');
 }
 
-/**
- * Asynchronously reads a local File object and converts it into a Base64 Data URL.
- * @param {File} file - Local file object to read.
- * @returns {Promise<string>} Data URL representation of file content.
- */
 async function readFileAsDataUrl(file) {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -291,103 +434,63 @@ async function readFileAsDataUrl(file) {
   });
 }
 
-/**
- * Safely extracts error message from fetch response, handling JSON and non-JSON (HTML/text) error bodies.
- * @param {Response} response - Fetch response object.
- * @param {string} fallbackMsg - Default error message if parsing fails.
- * @returns {Promise<string>} Detailed error message.
- */
 async function getErrorMessage(response, fallbackMsg = 'Request failed') {
   try {
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const body = await response.json();
-      if (body && body.error) return body.error;
+    const data = await response.json();
+    return data?.error || fallbackMsg;
+  } catch (_) {
+    try {
+      const text = await response.text();
+      return text || fallbackMsg;
+    } catch {
+      return fallbackMsg;
     }
-    if (response.status === 413) {
-      return 'File size exceeds server upload limit (max 500MB).';
-    }
-    const text = await response.text();
-    if (text && text.trim() && !text.startsWith('<!DOCTYPE') && !text.startsWith('<html')) {
-      return text.trim();
-    }
-  } catch (_) {}
-  return `${fallbackMsg} (${response.status} ${response.statusText || ''})`.trim();
-}
-
-/**
- * Fetches valid screen types from `/screen-types` endpoint and populates `screenTypes` state array.
- * @returns {Promise<void>}
- */
-async function loadScreenTypes() {
-  const response = await fetch('/screen-types');
-  if (!response.ok) {
-    throw new Error(`Failed to load screen types: ${response.status}`);
-  }
-
-  const text = await response.text();
-  screenTypes = text
-    .split(',')
-    .map(type => type.trim())
-    .filter(Boolean);
-
-  if (screenDefaultTypeEl) {
-    screenDefaultTypeEl.innerHTML = getScreenTypeOptions();
   }
 }
 
-/**
- * Fetches custom content library entries from `/custom-contents` endpoint and re-renders content list.
- * @returns {Promise<void>}
- */
-async function loadCustomContents() {
-  const response = await fetch('/custom-contents');
-  if (!response.ok) {
-    throw new Error(`Failed to load content library: ${response.status}`);
-  }
-  customContents = await response.json();
-  renderContentList();
+function updateContentFields() {
+  const isPng = contentTypeEl.value === 'png';
+  linkFieldsEl.style.display = isPng ? 'none' : 'block';
+  pngFieldsEl.style.display = isPng ? 'block' : 'none';
 }
 
-/**
- * Synchronizes all admin panel data by reloading screen types, custom content library, and display states.
- * @returns {Promise<void>}
- */
-async function refreshAdminData() {
-  await Promise.all([loadScreenTypes(), loadCustomContents()]);
-  renderDisplayList();
-  renderScreenRoster();
-  socket.emit('request-display-list');
+function setScreenMessage(message, isError) {
+  if (!screenMessageEl) return;
+  screenMessageEl.textContent = message;
+  screenMessageEl.style.color = isError ? '#DC2626' : '#16A34A';
 }
 
-/**
- * Renders configured screen roster into the screens panel DOM element.
- */
+function renderScreenTypeDropdown() {
+  if (!screenDefaultTypeEl) return;
+  screenDefaultTypeEl.innerHTML = screenTypes
+    .map(type => `<option value="${type}">${type}</option>`)
+    .join('');
+}
+
 function renderScreenRoster() {
   if (!screenListEl) return;
   if (connectedDisplays.length === 0) {
-    screenListEl.innerHTML = '<span class="muted">No rostered screens configured.</span>';
+    screenListEl.innerHTML = '<span class="muted">No hay pantallas registradas aún.</span>';
     return;
   }
 
   screenListEl.innerHTML = connectedDisplays
     .map(d => {
       const isOnline = Boolean(d.connected);
-      const dotColor = isOnline ? '#0F6E56' : '#94a3b8';
-      const statusLabel = isOnline ? 'online' : 'offline';
+      const dotColor = isOnline ? '#16A34A' : '#94A3B8';
+      const statusLabel = isOnline ? 'en línea' : 'desconectada';
       return `
-        <div class="content-card" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <div>
+        <div class="display-row" style="opacity: ${isOnline ? '1' : '0.75'};">
+          <span>
             <span class="dot" style="background: ${dotColor};"></span>
             <strong>${escapeHtml(d.screenId)}</strong>
             <span class="muted">(${statusLabel})</span>
-          </div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <label class="muted" style="font-size: 13px;">Default:</label>
+          </span>
+          <div style="display:flex; align-items:center; gap:8px;">
             <select class="roster-type-select" data-screen-id="${escapeHtml(d.screenId)}">
               ${getScreenTypeOptions(d.screenType)}
             </select>
-            <button class="danger delete-screen-btn" data-screen-id="${escapeHtml(d.screenId)}">Delete</button>
+            <button class="danger delete-screen-btn" data-screen-id="${escapeHtml(d.screenId)}">Eliminar</button>
           </div>
         </div>
       `;
@@ -395,183 +498,177 @@ function renderScreenRoster() {
     .join('');
 }
 
-function setScreenMessage(message, isError) {
-  if (!screenMessageEl) return;
-  screenMessageEl.textContent = message;
-  screenMessageEl.style.color = isError ? '#a20000' : '#0F6E56';
+async function fetchScreenTypes() {
+  const response = await fetch('/screen-types');
+  if (!response.ok) throw new Error('No se pudieron cargar los tipos de pantalla');
+  const text = await response.text();
+  screenTypes = text.split(',').map(s => s.trim()).filter(Boolean);
+  renderScreenTypeDropdown();
 }
 
-async function saveScreen(screenIdParam, defaultScreenTypeParam) {
-  const screenId = normalizeScreenType(screenIdParam || (screenIdInputEl ? screenIdInputEl.value : ''));
-  const defaultScreenType = defaultScreenTypeParam || (screenDefaultTypeEl ? screenDefaultTypeEl.value : '');
-  if (!screenId) {
-    throw new Error('Screen ID is required');
+async function fetchCustomContents() {
+  const response = await fetch('/custom-contents');
+  if (!response.ok) throw new Error('No se pudieron cargar los contenidos');
+  customContents = await response.json();
+  renderContentList();
+}
+
+async function refreshAdminData() {
+  await Promise.all([
+    fetchScreenTypes(),
+    fetchCustomContents()
+  ]);
+  renderDisplayList();
+  renderScreenRoster();
+}
+
+async function saveLinkContent(screenType, provider, urlEn, urlEs) {
+  const response = await fetch('/custom-contents/link', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ screenType, provider, urlEn, urlEs })
+  });
+  if (!response.ok) {
+    const errMsg = await getErrorMessage(response, 'No se pudo guardar el contenido');
+    throw new Error(errMsg);
   }
-  if (!defaultScreenType) {
-    throw new Error('Default screen type is required');
+}
+
+async function uploadMediaFile(screenType, language, file) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const response = await fetch('/custom-contents/media', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      screenType,
+      language,
+      fileName: file.name,
+      dataUrl
+    })
+  });
+  if (!response.ok) {
+    const errMsg = await getErrorMessage(response, `Error al subir archivo para ${language}`);
+    throw new Error(errMsg);
   }
+}
+
+async function saveContent() {
+  const screenType = normalizeScreenType(contentScreenTypeEl.value);
+  if (!screenType) throw new Error('El identificador de pantalla (Key) es requerido');
+
+  const contentType = contentTypeEl.value;
+  if (contentType === 'link') {
+    const provider = contentProviderEl.value;
+    const urlEn = contentLinkEnEl.value.trim();
+    const urlEs = contentLinkEsEl.value.trim();
+    await saveLinkContent(screenType, provider, urlEn, urlEs);
+  } else {
+    const fileEn = contentPngEnEl.files?.[0];
+    const fileEs = contentPngEsEl.files?.[0] || fileEn;
+
+    if (!fileEn) throw new Error('Se requiere un archivo multimedia para inglés');
+    await uploadMediaFile(screenType, 'en', fileEn);
+    if (fileEs) {
+      await uploadMediaFile(screenType, 'es', fileEs);
+    }
+  }
+
+  contentScreenTypeEl.value = '';
+  contentLinkEnEl.value = '';
+  contentLinkEsEl.value = '';
+  contentPngEnEl.value = '';
+  contentPngEsEl.value = '';
+  showToast(`Contenido "${screenType}" guardado`, 'success');
+}
+
+async function deleteContent(screenType) {
+  const response = await fetch(`/custom-contents/${encodeURIComponent(screenType)}`, {
+    method: 'DELETE',
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    const errMsg = await getErrorMessage(response, 'No se pudo eliminar el contenido');
+    throw new Error(errMsg);
+  }
+  showToast(`Contenido "${screenType}" eliminado`, 'info');
+}
+
+async function saveScreen(explicitId, explicitType) {
+  const rawId = explicitId || screenIdInputEl?.value;
+  const screenId = normalizeScreenType(rawId);
+  const defaultScreenType = explicitType || screenDefaultTypeEl?.value;
+
+  if (!screenId) throw new Error('El nombre de pantalla es requerido');
+  if (!defaultScreenType) throw new Error('Selecciona un contenido por defecto');
+
   const response = await fetch('/api/screens', {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ screenId, defaultScreenType })
   });
   if (!response.ok) {
-    const errMsg = await getErrorMessage(response, 'Unable to save screen');
+    const errMsg = await getErrorMessage(response, 'No se pudo guardar la pantalla');
     throw new Error(errMsg);
   }
+  showToast(`Pantalla "${screenId}" guardada`, 'success');
 }
 
 async function deleteScreen(screenId) {
   const response = await fetch(`/api/screens/${encodeURIComponent(screenId)}`, {
     method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${adminToken}` }
+    headers: authHeaders()
   });
   if (!response.ok) {
-    const errMsg = await getErrorMessage(response, 'Unable to delete screen');
+    const errMsg = await getErrorMessage(response, 'No se pudo eliminar la pantalla');
     throw new Error(errMsg);
   }
+  showToast(`Pantalla "${screenId}" eliminada del catálogo`, 'info');
 }
 
-/**
- * Toggles visibility of link input fields vs. PNG file upload fields based on content type drop-down.
- * @returns {void}
- */
-function updateContentFields() {
-  const isLink = contentTypeEl.value === 'link';
-  linkFieldsEl.style.display = isLink ? '' : 'none';
-  pngFieldsEl.style.display = isLink ? 'none' : '';
-}
+// User Actions & Event Listeners
+btnEn.onclick = () => {
+  socket.emit('set-language', { lang: 'en', token: adminToken });
+  showToast('Idioma cambiado a English', 'info');
+};
 
-/**
- * Sends HTTP POST request to `/custom-contents/link` to create/update external URL link content.
- * @param {string} screenType - Screen type key to attach content link to.
- * @returns {Promise<void>}
- */
-async function saveLinkContent(screenType) {
-  const rawUrlEn = contentLinkEnEl.value.trim();
-  const rawUrlEs = contentLinkEsEl.value.trim();
-  const urlEn = rawUrlEn || rawUrlEs;
-  const urlEs = rawUrlEs || rawUrlEn;
+btnEs.onclick = () => {
+  socket.emit('set-language', { lang: 'es', token: adminToken });
+  showToast('Idioma cambiado a Español', 'info');
+};
 
-  if (!urlEn && !urlEs) {
-    throw new Error('Please provide at least one URL (English or Spanish)');
-  }
-
-  const payload = {
-    screenType,
-    provider: contentProviderEl.value,
-    urlEn,
-    urlEs
-  };
-  const response = await fetch('/custom-contents/link', {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload)
-  });
-  if (!response.ok) {
-    const errMsg = await getErrorMessage(response, 'Unable to save link content');
-    throw new Error(errMsg);
-  }
-}
-
-/**
- * Reads English and/or Spanish media files and uploads them.
- * Automatically duplicates content for both languages if only one file is uploaded.
- * @param {string} screenType - Screen type key to attach media files to.
- * @returns {Promise<void>}
- */
-async function savePngContent(screenType) {
-  const fileEn = contentPngEnEl.files[0];
-  const fileEs = contentPngEsEl.files[0];
-
-  if (!fileEn && !fileEs) {
-    throw new Error('Please select at least one media file (English or Spanish)');
-  }
-
-  const uploadEn = fileEn || fileEs;
-  const uploadEs = fileEs || fileEn;
-
-  const dataUrlEn = await readFileAsDataUrl(uploadEn);
-  const responseEn = await fetch('/custom-contents/media', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-    body: JSON.stringify({
-      screenType,
-      language: 'en',
-      fileName: uploadEn.name,
-      dataUrl: dataUrlEn
-    })
-  });
-  if (!responseEn.ok) {
-    const errMsg = await getErrorMessage(responseEn, 'Unable to upload EN media file');
-    throw new Error(errMsg);
-  }
-
-  const dataUrlEs = (uploadEs === uploadEn) ? dataUrlEn : await readFileAsDataUrl(uploadEs);
-  const responseEs = await fetch('/custom-contents/media', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-    body: JSON.stringify({
-      screenType,
-      language: 'es',
-      fileName: uploadEs.name,
-      dataUrl: dataUrlEs
-    })
-  });
-  if (!responseEs.ok) {
-    const errMsg = await getErrorMessage(responseEs, 'Unable to upload ES media file');
-    throw new Error(errMsg);
-  }
-}
-
-/**
- * Validates form inputs and saves content (either external link or PNG asset files) to the backend.
- * @returns {Promise<void>}
- */
-async function saveContent() {
-  const screenType = normalizeScreenType(contentScreenTypeEl.value);
-  if (!screenType) {
-    throw new Error('Content key is required');
-  }
-  if (contentTypeEl.value === 'link') {
-    await saveLinkContent(screenType);
-  } else {
-    await savePngContent(screenType);
-  }
-}
-
-/**
- * Sends HTTP DELETE request to `/custom-contents/:screenType` to remove a content library entry.
- * @param {string} screenType - Screen type key to delete.
- * @returns {Promise<void>}
- */
-async function deleteContent(screenType) {
-  const response = await fetch(`/custom-contents/${encodeURIComponent(screenType)}`, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${adminToken}` }
-  });
-  if (!response.ok) {
-    const errMsg = await getErrorMessage(response, 'Unable to delete content');
-    throw new Error(errMsg);
-  }
-}
-
-btnEn.onclick = () => socket.emit('set-language', { lang: 'en', token: adminToken });
-btnEs.onclick = () => socket.emit('set-language', { lang: 'es', token: adminToken });
 tabControl.onclick = () => showTab('control');
 tabContent.onclick = () => showTab('content');
 if (tabScreens) tabScreens.onclick = () => showTab('screens');
+
+// Mobile Bottom Navigation Bar Click Listeners
+document.querySelectorAll('.mobile-nav-btn').forEach(btn => {
+  btn.onclick = () => {
+    const tab = btn.dataset.tab;
+    if (tab) showTab(tab);
+  };
+});
+
+// PWA Service Worker Registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+
 contentTypeEl.onchange = updateContentFields;
 
 saveContentBtn.onclick = async () => {
   saveContentBtn.disabled = true;
-  setContentMessage('Saving content…', false);
+  setContentMessage('Guardando contenido…', false);
   try {
     await saveContent();
     await refreshAdminData();
-    setContentMessage('Content saved successfully.', false);
+    setContentMessage('Contenido guardado con éxito.', false);
   } catch (error) {
     setContentMessage(error.message, true);
+    showToast(error.message, 'error');
   } finally {
     saveContentBtn.disabled = false;
   }
@@ -580,24 +677,22 @@ saveContentBtn.onclick = async () => {
 if (saveScreenBtn) {
   saveScreenBtn.onclick = async () => {
     saveScreenBtn.disabled = true;
-    setScreenMessage('Saving screen…', false);
+    setScreenMessage('Guardando pantalla…', false);
     try {
       await saveScreen();
       await refreshAdminData();
       if (screenIdInputEl) screenIdInputEl.value = '';
-      setScreenMessage('Screen saved successfully.', false);
+      setScreenMessage('Pantalla guardada con éxito.', false);
     } catch (error) {
       setScreenMessage(error.message, true);
+      showToast(error.message, 'error');
     } finally {
       saveScreenBtn.disabled = false;
     }
   };
 }
 
-/**
- * Socket Event: connect
- * Requests current language state and connected display list on connection.
- */
+// Socket Communication
 socket.on('connect', () => {
   socket.emit('request-state');
   socket.emit('request-display-list');
@@ -608,36 +703,35 @@ socket.on('content-library-changed', () => {
   refreshAdminData().catch((error) => setContentMessage(error.message, true));
 });
 
-/**
- * Event Listener: Display Screen Type Select Dropdown Change
- * Emits `set-display-screen-type` to server when admin changes a display's assigned screen type.
- */
 listEl.addEventListener('change', (event) => {
   const select = event.target.closest('.screen-type-select');
   if (!select) return;
 
+  const screenId = select.dataset.screenId;
+  const newType = select.value;
+
   socket.emit('set-display-screen-type', {
     screenId: select.dataset.screenId,
     socketId: select.dataset.socketId,
-    screenType: select.value,
+    screenType: newType,
     token: adminToken
   });
+
+  showToast(`${screenId} reasignada a "${newType}"`, 'success');
+  // Re-render thumbnail immediately for real-time responsiveness
+  const display = connectedDisplays.find(d => d.screenId === screenId);
+  if (display) {
+    display.screenType = newType;
+    renderDisplayList();
+  }
 });
 
-/**
- * Socket Event: display-list
- * Updates connected displays state array and re-renders display list UI.
- */
 socket.on('display-list', (displays) => {
   connectedDisplays = displays;
   renderDisplayList();
   renderScreenRoster();
 });
 
-/**
- * Event Listener: Delete Content Library Button Click
- * Handles deletion of custom content items from the library list view.
- */
 contentListEl.addEventListener('click', async (event) => {
   const button = event.target.closest('.delete-content-btn');
   if (!button) return;
@@ -646,13 +740,14 @@ contentListEl.addEventListener('click', async (event) => {
   if (!screenType) return;
 
   button.disabled = true;
-  setContentMessage(`Deleting ${screenType}…`, false);
+  setContentMessage(`Eliminando ${screenType}…`, false);
   try {
     await deleteContent(screenType);
     await refreshAdminData();
-    setContentMessage(`Deleted ${screenType}.`, false);
+    setContentMessage(`Eliminado ${screenType}.`, false);
   } catch (error) {
     setContentMessage(error.message, true);
+    showToast(error.message, 'error');
   } finally {
     button.disabled = false;
   }
@@ -667,13 +762,14 @@ if (screenListEl) {
     if (!screenId) return;
 
     button.disabled = true;
-    setScreenMessage(`Deleting ${screenId}…`, false);
+    setScreenMessage(`Eliminando ${screenId}…`, false);
     try {
       await deleteScreen(screenId);
       await refreshAdminData();
-      setScreenMessage(`Deleted ${screenId}.`, false);
+      setScreenMessage(`Eliminada ${screenId}.`, false);
     } catch (error) {
       setScreenMessage(error.message, true);
+      showToast(error.message, 'error');
     } finally {
       button.disabled = false;
     }
@@ -686,13 +782,14 @@ if (screenListEl) {
     const screenId = select.dataset.screenId;
     const defaultScreenType = select.value;
     select.disabled = true;
-    setScreenMessage(`Updating default content for ${screenId}…`, false);
+    setScreenMessage(`Actualizando contenido por defecto para ${screenId}…`, false);
     try {
       await saveScreen(screenId, defaultScreenType);
       await refreshAdminData();
-      setScreenMessage(`Updated default content for ${screenId}.`, false);
+      setScreenMessage(`Actualizado para ${screenId}.`, false);
     } catch (error) {
       setScreenMessage(error.message, true);
+      showToast(error.message, 'error');
     } finally {
       select.disabled = false;
     }

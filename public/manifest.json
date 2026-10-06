@@ -1,0 +1,19 @@
+{
+  "name": "Mostla Showroom Admin",
+  "short_name": "Mostla Hub",
+  "description": "Panel de control táctil de pantallas y contenidos para Mostla Showroom",
+  "start_url": "/admin.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0039A6",
+  "theme_color": "#0039A6",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

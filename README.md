@@ -93,10 +93,10 @@ npm start
 ```
 
 ### 3. Open in Browser
-- **Admin Panel:** [http://localhost:3000/admin.html](http://localhost:3000/admin.html)
+- **Admin Panel:** [http://localhost:3002/admin.html](http://localhost:3002/admin.html)
   - Default Admin Password: `admin123` (configurable via `ADMIN_PASSWORD` env var).
-- **Display Screen 1:** [http://localhost:3000/display.html?screen=screen1](http://localhost:3000/display.html?screen=screen1)
-- **Display Screen 2:** [http://localhost:3000/display.html?screen=screen2](http://localhost:3000/display.html?screen=screen2)
+- **Display Screen 1:** [http://localhost:3002/display.html?screen=screen1](http://localhost:3002/display.html?screen=screen1)
+- **Display Screen 2:** [http://localhost:3002/display.html?screen=screen2](http://localhost:3002/display.html?screen=screen2)
 
 ---
 
@@ -105,7 +105,7 @@ npm start
 Each display screen runs `display.html` in fullscreen kiosk mode:
 
 ```text
-http://<hub-ip>:3000/display.html?screen=<SCREEN_ID>
+http://<hub-ip>:3002/display.html?screen=<SCREEN_ID>
 ```
 
 ### URL Parameters
@@ -145,28 +145,28 @@ Access `http://<hub-ip>:3000/admin.html` and log in with your admin password.
 
 ---
 
-## macOS Hub Server & Cloudflare Tunnel
+## macOS Hub Server & ngrok / Cloudflare Tunnel
 
-To host the hub server on a Mac (Intel or Apple Silicon) and tunnel it securely through Cloudflare:
+To host the hub server on a Mac (Intel or Apple Silicon) and tunnel it securely with a **permanent, fixed URL**:
 
 ### 1. Install Dependencies
 ```bash
-brew install node cloudflare/cloudflare/cloudflared
+brew install node ngrok/ngrok/ngrok
 ```
+*(Or install `cloudflared` if you prefer Cloudflare Tunnel).*
 
-### 2. Interactive Launcher (`scripts/start-hub-mac.sh`)
+### 2. Configure & Launch (`scripts/start-hub-mac.sh`)
 ```bash
 chmod +x ./scripts/start-hub-mac.sh
 ./scripts/start-hub-mac.sh
 ```
-- **Interactive Setup:** On first run, configure Port (default `3000`), Admin Password, and optional Cloudflare Token. Settings save to `scripts/hub-config.json`.
-- **Quick Tunnel (TryCloudflare):** If no token is provided, a free, instant public URL (`https://*.trycloudflare.com`) is generated and printed in your terminal.
-- **Zero Trust Tunnel:** Provide your tunnel token to bind to your own custom domain.
-- Cleanly stops both Node and Cloudflare Tunnel on `Ctrl+C`.
-- To reconfigure settings: `./scripts/start-hub-mac.sh --reset`.
+- **First-time setup:** Prompts for your Admin Password and your free **ngrok Static Domain** (e.g. `tremor-tacky-dandelion.ngrok-free.dev` or `your-subdomain.ngrok-free.app`).
+- The public URL is fixed and stays identical on every restart!
+- Automatically cleans up any lingering processes on port `3002`.
+- Settings save to `scripts/hub-config.json`. To reconfigure anytime: `./scripts/start-hub-mac.sh --reset`.
 
 ### 3. Background Auto-Start on Boot (`LaunchAgent`)
-To have the hub server start automatically when the Mac powers on or logs in:
+To have the hub server and ngrok tunnel run automatically when the Mac powers on or logs in:
 ```bash
 chmod +x ./scripts/setup-mac-autostart.sh
 ./scripts/setup-mac-autostart.sh install
@@ -175,14 +175,33 @@ chmod +x ./scripts/setup-mac-autostart.sh
 **Management:**
 - **Check Status:** `./scripts/setup-mac-autostart.sh status`
 - **View Live Logs & Public URL:** `tail -f ~/Library/Logs/mostla-showroom.log`
-- **View Errors:** `tail -f ~/Library/Logs/mostla-showroom.err.log`
+- **View Server Output:** `tail -f ~/Library/Logs/mostla-server.log`
+- **View Tunnel Output:** `tail -f ~/Library/Logs/mostla-tunnel.log`
 - **Uninstall:** `./scripts/setup-mac-autostart.sh uninstall`
 
 ---
 
-## Display Auto-Start Kiosks
+## Manual Kiosk Launcher (PoC)
 
-Automate display PCs so they launch fullscreen into the showroom on boot without user interaction.
+For testing or manual demonstrations without configuring automatic system boot, you can launch any display in fullscreen kiosk mode on **both macOS and Windows**:
+
+```bash
+npm run kiosk
+```
+Or run directly:
+- **macOS / Linux:** `./launch-kiosk.sh` (or `node scripts/launch-kiosk.js`)
+- **Windows:** Double-click `launch-kiosk.bat` (or `node scripts/launch-kiosk.js`)
+
+**Workflow:**
+1. It shows any currently registered screens in `screens.json`.
+2. It prompts you for the **Screen Name** (e.g. `screen1`, `lobby`).
+3. It prompts you for the **Hub URL** (defaults to `http://localhost:3002` or your saved ngrok domain).
+4. Automatically detects Chrome, Edge, Brave, Firefox, or Safari and launches a dedicated fullscreen kiosk window.
+5. **To exit kiosk mode:** Press `Alt + F4` (Windows) or `Command + Q` / `Esc` (macOS).
+
+---
+
+## Display Auto-Start Kiosks (Permanent Boot)
 
 ### Windows Kiosk
 
@@ -280,7 +299,7 @@ Environment variables can be set in your environment or passed when starting Nod
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `3000` | HTTP port for the Hub server. |
+| `PORT` | `3002` | HTTP port for the Hub server. |
 | `ADMIN_PASSWORD` | `admin123` | Password required to unlock the admin dashboard. |
 
 ---

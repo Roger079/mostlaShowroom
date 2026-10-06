@@ -4,6 +4,7 @@ const rawScreen = (params.get('screen') || '').replace(/^["']|["']$/g, '').trim(
 const displayId = rawDisplayId || Math.floor(Math.random() * 10000).toString().padStart(4, '0');
 let currentScreenType = rawScreen || displayId;
 let assignedContent = null;
+
 const canvaUrls = {
   en: params.get('canvaEn') || params.get('canva') || '',
   es: params.get('canvaEs') || params.get('canva') || ''
@@ -20,13 +21,54 @@ const imgEn = document.getElementById('img-en');
 const imgEs = document.getElementById('img-es');
 const videoEn = document.getElementById('video-en');
 const videoEs = document.getElementById('video-es');
-const embedFrame = document.getElementById('embed-frame');
+const embedEn = document.getElementById('embed-en') || document.getElementById('embed-frame');
+const embedEs = document.getElementById('embed-es') || document.getElementById('embed-frame');
 const statusEl = document.getElementById('status');
+
 let currentLanguage = 'en';
+let statusTimer = null;
+let forceShowStatus = false;
 
 /**
- * Determines embed source configuration from URL search query parameters (Canva or Genially).
- * @returns {{ name: string, urls: { en: string, es: string } } | null} Embed source object or null.
+ * Updates status badge content and handles intelligent auto-fading.
+ * @param {string} text - Status message.
+ * @param {'info'|'warning'|'error'} [type='info'] - Status category.
+ */
+function updateStatus(text, type = 'info') {
+  if (!statusEl) return;
+  statusEl.textContent = text;
+  statusEl.classList.remove('warning', 'error', 'hidden');
+
+  if (type === 'warning') statusEl.classList.add('warning');
+  if (type === 'error') statusEl.classList.add('error');
+
+  if (forceShowStatus) return;
+
+  clearTimeout(statusTimer);
+  // Errors and warnings stay visible until resolved. Normal statuses fade out in 3.5s
+  if (type === 'info') {
+    statusTimer = setTimeout(() => {
+      if (!forceShowStatus) {
+        statusEl.classList.add('hidden');
+      }
+    }, 3500);
+  }
+}
+
+// Press 'D' to toggle debug status badge permanently
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'd' || e.key === 'D') {
+    forceShowStatus = !forceShowStatus;
+    if (forceShowStatus) {
+      statusEl.classList.remove('hidden');
+    } else {
+      statusEl.classList.add('hidden');
+    }
+  }
+});
+
+/**
+ * Determines embed source configuration from URL query parameters.
  */
 function getEmbedSource() {
   if (embedProviderParam === 'genially' && hasGeniallyDisplay) {
@@ -49,64 +91,72 @@ const hasQueryEmbeddedDisplay = Boolean(embedSource);
 
 /**
  * Validates and returns a normalized display URL.
- * @param {string} url - Raw URL to validate.
- * @returns {string} Validated URL string or empty string if invalid.
  */
 function getValidDisplayUrl(url) {
   if (!url) return '';
-  if (!URL.canParse(url)) {
-    return '';
-  }
+  if (!URL.canParse(url)) return '';
   const parsed = new URL(url);
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return '';
-  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
   return parsed.toString();
 }
 
 /**
  * Resolves the appropriate embed URL string for a target language.
- * @param {'en'|'es'} lang - Target language code.
- * @returns {string} Embed URL string.
  */
 function getEmbedUrlForLanguage(lang) {
   const source = assignedContent?.type === 'link' ? assignedContent : embedSource;
   if (!source) return '';
-  const byLanguage = source.urls[lang];
+  const byLanguage = source.urls?.[lang];
   if (byLanguage) return byLanguage;
-  return source.urls.en || source.urls.es;
+  return source.urls?.en || source.urls?.es || '';
 }
 
 /**
- * Renders an iframe embed for the specified language.
- * @param {'en'|'es'} lang - Target language code.
- * @returns {boolean} True if successfully rendered, false if URL is invalid.
+ * Pre-renders and displays embed iframes (dual iframes for zero-reload crossfade).
  */
 function renderEmbed(lang) {
-  const embedUrl = getValidDisplayUrl(getEmbedUrlForLanguage(lang));
-  if (!embedUrl) {
+  const targetUrl = getValidDisplayUrl(getEmbedUrlForLanguage(lang));
+  if (!targetUrl) {
     const sourceName = assignedContent?.provider || embedSource?.name || 'embed';
-    statusEl.textContent = `${displayId} — invalid ${sourceName} url`;
+    updateStatus(`${displayId} — URL de ${sourceName} inválida`, 'error');
     return false;
   }
 
-  if (embedFrame.src !== embedUrl) {
-    embedFrame.src = embedUrl;
+  // Pre-fill both iframes whenever available to make transitions instant
+  const urlEn = getValidDisplayUrl(getEmbedUrlForLanguage('en'));
+  const urlEs = getValidDisplayUrl(getEmbedUrlForLanguage('es'));
+
+  if (embedEn && urlEn && embedEn.src !== urlEn) {
+    embedEn.src = urlEn;
   }
-  embedFrame.classList.add('visible');
+  if (embedEs && urlEs && embedEs.src !== urlEs) {
+    embedEs.src = urlEs;
+  }
+
+  // Dual iframe crossfade (if separate iframes exist)
+  if (embedEn && embedEs && embedEn !== embedEs) {
+    embedEn.classList.toggle('visible', lang === 'en');
+    embedEs.classList.toggle('visible', lang === 'es');
+  } else if (embedEn) {
+    if (embedEn.src !== targetUrl) {
+      embedEn.src = targetUrl;
+    }
+    embedEn.classList.add('visible');
+  }
+
+  // Hide media layers
   imgEn.classList.remove('visible');
   imgEs.classList.remove('visible');
   videoEn.classList.remove('visible');
   videoEs.classList.remove('visible');
   videoEn.pause();
   videoEs.pause();
+
   return true;
 }
 
 /**
  * Normalizes and stores content configuration received from server.
- * @param {Object|null} content - Server content payload.
- * @returns {void}
  */
 function setAssignedContent(content) {
   if (!content) {
@@ -136,8 +186,6 @@ function setAssignedContent(content) {
 
 /**
  * Determines media type ('image', 'video', 'gif', 'embed') for a given language code.
- * @param {'en'|'es'} lang - Target language code.
- * @returns {string} Resolved media type keyword.
  */
 function getMediaTypeForLanguage(lang) {
   if (!assignedContent) {
@@ -165,7 +213,6 @@ function getMediaTypeForLanguage(lang) {
 
 /**
  * Updates DOM media element source URLs for both English and Spanish layers.
- * @returns {void}
  */
 function updateMediaSources() {
   const langEnType = getMediaTypeForLanguage('en');
@@ -221,20 +268,16 @@ function updateMediaSources() {
 }
 
 /**
- * Updates active screen type assignment and updates status display text.
- * @param {string} screenType - Screen type key.
- * @returns {void}
+ * Updates active screen type assignment.
  */
 function setScreenType(screenType) {
   currentScreenType = screenType;
   updateMediaSources();
-  statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage})`;
+  updateStatus(`${displayId} — ${currentScreenType} (${currentLanguage})`);
 }
 
 /**
- * Displays active language media layer (toggles opacity transitions and media playback).
- * @param {'en'|'es'} lang - Target language code.
- * @returns {void}
+ * Displays active language media layer (with video time-sync and zero-reload iframe transitions).
  */
 function showLanguage(lang) {
   currentLanguage = lang;
@@ -245,12 +288,13 @@ function showLanguage(lang) {
     const rendered = renderEmbed(lang);
     if (rendered) {
       const sourceName = assignedContent?.provider || embedSource?.name || 'embed';
-      statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage}, ${sourceName})`;
+      updateStatus(`${displayId} — ${currentScreenType} (${currentLanguage.toUpperCase()}, ${sourceName})`);
     }
     return;
   }
 
-  embedFrame.classList.remove('visible');
+  if (embedEn) embedEn.classList.remove('visible');
+  if (embedEs && embedEs !== embedEn) embedEs.classList.remove('visible');
 
   const isEn = lang === 'en';
   const isEs = lang === 'es';
@@ -265,31 +309,42 @@ function showLanguage(lang) {
   imgEn.classList.toggle('visible', showImgEn);
   imgEs.classList.toggle('visible', showImgEs);
 
+  // Synchronize playback time when toggling between video layers
   if (showVideoEn) {
-    videoEn.play().catch(() => { });
+    if (videoEs.currentTime > 0 && Math.abs(videoEn.currentTime - videoEs.currentTime) > 0.5) {
+      try { videoEn.currentTime = videoEs.currentTime; } catch (_) {}
+    }
+    videoEn.play().catch(() => {});
     videoEs.pause();
   } else if (showVideoEs) {
-    videoEs.play().catch(() => { });
+    if (videoEn.currentTime > 0 && Math.abs(videoEs.currentTime - videoEn.currentTime) > 0.5) {
+      try { videoEs.currentTime = videoEn.currentTime; } catch (_) {}
+    }
+    videoEs.play().catch(() => {});
     videoEn.pause();
   } else {
     videoEn.pause();
     videoEs.pause();
   }
 
-  statusEl.textContent = `${displayId} — ${currentScreenType} (${currentLanguage}, ${currentMediaType})`;
+  updateStatus(`${displayId} — ${currentScreenType} (${currentLanguage.toUpperCase()}, ${currentMediaType})`);
 }
 
-// Socket.IO Communication Handler
+// Socket.IO Connection Handler
 const socket = io();
 
 socket.on('connect', () => {
-  statusEl.textContent = `${displayId} — connected`;
+  updateStatus(`${displayId} — conectado`, 'info');
   socket.emit('register-display', { displayId, screenId: displayId });
   socket.emit('request-state');
 });
 
 socket.on('disconnect', () => {
-  statusEl.textContent = `${displayId} — disconnected, retrying…`;
+  updateStatus(`${displayId} — reconectando…`, 'warning');
+});
+
+socket.on('error', (payload) => {
+  updateStatus(payload?.message || `${displayId} — error de conexión`, 'error');
 });
 
 socket.on('display-config', ({ screenType, language, content }) => {

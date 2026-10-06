@@ -9,22 +9,6 @@
       }
     },
     {
-      "screenType": "libai",
-      "provider": "canva",
-      "urls": {
-        "en": "https://www.canva.com/design/DAGgzwJ5j3Q/O7uOd7-u52vsxlM0uF02uw/view?utm_content=DAGgzwJ5j3Q&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h0f60e14070#4",
-        "es": "https://www.canva.com/design/DAGgzwJ5j3Q/O7uOd7-u52vsxlM0uF02uw/view?utm_content=DAGgzwJ5j3Q&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h0f60e14070#4"
-      }
-    },
-    {
-      "screenType": "video_test",
-      "provider": "video",
-      "urls": {
-        "en": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-        "es": "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"
-      }
-    },
-    {
       "screenType": "ia",
       "provider": "link",
       "urls": {

@@ -3,7 +3,15 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>Showroom Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Mostla Showroom — Admin</title>
+  <meta name="theme-color" content="#0039A6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Mostla Hub">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/icons/icon.svg">
   <link rel="stylesheet" href="/css/admin.css">
 </head>
 
@@ -11,115 +19,163 @@
   <!-- Admin Authentication Modal -->
   <div id="login-overlay" class="login-overlay">
     <div class="login-card">
-      <h2>Admin Authentication</h2>
-      <p>Please enter the admin password to access controls.</p>
+      <div class="brand-eyebrow">TECNOLÓGICO DE MONTERREY</div>
+      <h2>Mostla Showroom</h2>
+      <p class="login-subtext">Ingresa la contraseña de administrador para acceder al panel de control.</p>
       <form id="login-form">
-        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password"
+        <input type="password" id="login-password" placeholder="Contraseña de admin" autocomplete="current-password"
           required>
-        <button type="submit" id="login-submit-btn">Unlock Admin</button>
+        <button type="submit" id="login-submit-btn">Ingresar al panel</button>
         <div id="login-error" class="login-error"></div>
       </form>
     </div>
   </div>
 
-  <div class="header-bar">
-    <h1>Showroom admin</h1>
-    <button id="logout-btn" class="logout-btn" style="display:none;">Log Out</button>
-  </div>
-  <div class="tabs">
-    <button id="tab-control" class="tab-btn active">Language Control</button>
-    <button id="tab-content" class="tab-btn">Content Library</button>
-    <button id="tab-screens" class="tab-btn">Screen management</button>
-  </div>
+  <div class="admin-wrapper">
+    <header class="header-bar">
+      <div class="brand-block">
+        <span class="brand-eyebrow">TECNOLÓGICO DE MONTERREY</span>
+        <div class="brand-title-wrap">
+          <h1>Mostla Showroom</h1>
+        </div>
+      </div>
+    </header>
 
-  <section id="panel-control" class="tab-panel active">
-    <p>Current language: <strong id="current-lang">—</strong></p>
+    <nav class="tabs">
+      <button id="tab-control" class="tab-btn active">Control de Idioma</button>
+      <button id="tab-content" class="tab-btn">Biblioteca de Contenido</button>
+      <button id="tab-screens" class="tab-btn">Gestión de Pantallas</button>
+    </nav>
 
-    <div class="buttons">
-      <button id="btn-en">English</button>
-      <button id="btn-es">Español</button>
-    </div>
+    <!-- Language Control Tab -->
+    <section id="panel-control" class="tab-panel active">
+      <div class="lang-status-bar">
+        <span>Idioma global activo:</span>
+        <span class="lang-pill" id="current-lang">—</span>
+      </div>
 
-    <div id="displays">
-      <h2 style="font-size:16px;">Connected displays</h2>
-      <div id="display-list"><span id="empty">No displays connected yet</span></div>
-    </div>
-  </section>
+      <div class="buttons">
+        <button id="btn-en">
+          <span class="btn-lang-title">English</span>
+          <span class="btn-lang-sub">Cambiar showroom a inglés</span>
+        </button>
+        <button id="btn-es">
+          <span class="btn-lang-title">Español</span>
+          <span class="btn-lang-sub">Cambiar showroom a español</span>
+        </button>
+      </div>
 
-  <section id="panel-content" class="tab-panel">
-    <h2 style="font-size:16px;">Add content</h2>
-    <div class="content-row">
-      <label for="content-type">Content type</label>
-      <select id="content-type">
-        <option value="link">Link (Canva / Genially / webpage / Video URL)</option>
-        <option value="png">Media file upload (MKV, MP4, WEBM, PNG, JPG)</option>
-      </select>
-    </div>
-    <div class="content-row">
-      <label for="content-screen-type">Content key / screen type</label>
-      <input id="content-screen-type" placeholder="example: promo-fall">
-    </div>
+      <div id="displays">
+        <div class="section-title-wrap">
+          <h2 class="section-title">Pantallas Conectadas</h2>
+          <span id="display-count-badge" class="badge-count">0 en línea</span>
+        </div>
+        <div id="display-list" class="display-grid">
+          <span id="empty">No hay pantallas conectadas</span>
+        </div>
+      </div>
+    </section>
 
-    <div id="link-fields">
+    <!-- Content Library Tab -->
+    <section id="panel-content" class="tab-panel">
+      <h2 class="section-title">Agregar Contenido</h2>
+      
       <div class="content-row">
-        <label for="content-provider">Provider label</label>
-        <select id="content-provider">
-          <option value="link">Generic link</option>
-          <option value="video">Direct Video URL (MP4 / MKV / WEBM)</option>
-          <option value="canva">Canva</option>
-          <option value="genially">Genially</option>
+        <label for="content-type">Tipo de contenido</label>
+        <select id="content-type">
+          <option value="link">Enlace web (Canva / Genially / URL de Video)</option>
+          <option value="png">Archivo multimedia local (MP4, MKV, PNG, JPG)</option>
         </select>
       </div>
+
       <div class="content-row">
-        <label for="content-link-en">English URL</label>
-        <input id="content-link-en" placeholder="https://... (leave empty if only providing Spanish URL)">
+        <label for="content-screen-type">Identificador de contenido (Key)</label>
+        <input id="content-screen-type" placeholder="ejemplo: telepresencia, promo-mostla">
       </div>
+
+      <div id="link-fields">
+        <div class="content-row">
+          <label for="content-provider">Proveedor / Formato</label>
+          <select id="content-provider">
+            <option value="link">Enlace web genérico</option>
+            <option value="video">URL directa de video (MP4 / MKV / WEBM)</option>
+            <option value="canva">Canva</option>
+            <option value="genially">Genially</option>
+          </select>
+        </div>
+        <div class="content-row">
+          <label for="content-link-en">URL en Inglés</label>
+          <input id="content-link-en" placeholder="https://... (vacío si solo se proporciona en español)">
+        </div>
+        <div class="content-row">
+          <label for="content-link-es">URL en Español</label>
+          <input id="content-link-es" placeholder="https://... (vacío para reutilizar la URL en inglés)">
+        </div>
+      </div>
+
+      <div id="png-fields" style="display:none;">
+        <div class="content-row">
+          <label for="content-png-en">Archivo en Inglés (Video / Imagen)</label>
+          <input id="content-png-en" type="file" accept="video/*,image/*,.mkv,.mp4,.webm,.mov,.m4v,.avi">
+        </div>
+        <div class="content-row">
+          <label for="content-png-es">Archivo en Español (Opcional si se reutiliza el de inglés)</label>
+          <input id="content-png-es" type="file" accept="video/*,image/*,.mkv,.mp4,.webm,.mov,.m4v,.avi">
+        </div>
+      </div>
+
+      <div class="content-actions">
+        <button id="save-content-btn" class="primary-btn">Guardar Contenido</button>
+      </div>
+      <div id="content-message"></div>
+
+      <h2 class="section-title" style="margin-top:28px;">Contenidos Registrados</h2>
+      <div id="content-list"><span class="muted">No hay contenidos registrados aún.</span></div>
+    </section>
+
+    <!-- Screen Management Tab -->
+    <section id="panel-screens" class="tab-panel">
+      <h2 class="section-title">Registrar / Editar Pantalla</h2>
+      
       <div class="content-row">
-        <label for="content-link-es">Spanish URL</label>
-        <input id="content-link-es" placeholder="https://... (leave empty to reuse English URL)">
+        <label for="screen-id-input">ID o Nombre de Pantalla</label>
+        <input id="screen-id-input" placeholder="ejemplo: screen1, entrada-lobby">
       </div>
-    </div>
-
-    <div id="png-fields" style="display:none;">
+      
       <div class="content-row">
-        <label for="content-png-en">English media file</label>
-        <input id="content-png-en" type="file" accept="video/*,image/*,.mkv,.mp4,.webm,.mov,.m4v,.avi">
+        <label for="screen-default-type">Contenido por Defecto</label>
+        <select id="screen-default-type">
+          <!-- Opciones cargadas dinámicamente -->
+        </select>
       </div>
-      <div class="content-row">
-        <label for="content-png-es">Spanish media file (optional if English file uploaded)</label>
-        <input id="content-png-es" type="file" accept="video/*,image/*,.mkv,.mp4,.webm,.mov,.m4v,.avi">
+      
+      <div class="content-actions">
+        <button id="save-screen-btn" class="primary-btn">Guardar Pantalla</button>
       </div>
-    </div>
+      <div id="screen-message"></div>
 
-    <div class="content-actions">
-      <button id="save-content-btn">Save content</button>
-    </div>
-    <div id="content-message"></div>
+      <h2 class="section-title" style="margin-top:28px;">Catálogo de Pantallas Autorizadas</h2>
+      <div id="screen-list"><span class="muted">Cargando catálogo...</span></div>
+    </section>
+  </div>
 
-    <h2 style="font-size:16px; margin-top:24px;">Library entries</h2>
-    <div id="content-list"><span class="muted">No content yet.</span></div>
-  </section>
+  <div id="toast-container" class="toast-container"></div>
 
-  <section id="panel-screens" class="tab-panel">
-    <h2 style="font-size:16px;">Add or update display screen</h2>
-    <div class="content-row">
-      <label for="screen-id-input">Screen ID / Name</label>
-      <input id="screen-id-input" placeholder="e.g. screen2 or lobby-display">
-    </div>
-    <div class="content-row">
-      <label for="screen-default-type">Default Content / Screen Type</label>
-      <select id="screen-default-type">
-        <!-- Options populated dynamically -->
-      </select>
-    </div>
-    <div class="content-actions">
-      <button id="save-screen-btn">Save screen</button>
-    </div>
-    <div id="screen-message"></div>
-
-    <h2 style="font-size:16px; margin-top:24px;">Configured screen roster</h2>
-    <div id="screen-list"><span class="muted">Loading screens...</span></div>
-  </section>
+  <!-- Ergonomic Mobile Bottom Navigation Bar (Visible only on <=640px) -->
+  <nav class="mobile-nav" id="mobile-nav" aria-label="Navegación móvil">
+    <button class="mobile-nav-btn active" data-tab="control" id="mobile-nav-control">
+      <span class="mobile-nav-icon">🌐</span>
+      <span class="mobile-nav-label">Idioma</span>
+    </button>
+    <button class="mobile-nav-btn" data-tab="content" id="mobile-nav-content">
+      <span class="mobile-nav-icon">📁</span>
+      <span class="mobile-nav-label">Biblioteca</span>
+    </button>
+    <button class="mobile-nav-btn" data-tab="screens" id="mobile-nav-screens">
+      <span class="mobile-nav-icon">🖥️</span>
+      <span class="mobile-nav-label">Pantallas</span>
+    </button>
+  </nav>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/admin.js" defer></script>
